@@ -70,11 +70,21 @@ export async function handleHttpRequest(
   }
 
   if (route === '/health') {
+    const stats = metrics.snapshot()
+    const storageHealthy = stats.storageFailures === 0
+    // Deliberately still 200 when storage is failing. This is the endpoint the
+    // host's health check polls, and a 503 would restart the instance in a
+    // loop -- turning a durability problem into an outage, when the relay is
+    // in fact serving every connected client perfectly well. The degraded
+    // status and the failure count say what is wrong without pulling the pin.
     send(response, 200, {
-      status: 'ok',
+      status: storageHealthy ? 'ok' : 'degraded',
       driver: store.driver,
       authMode: config.authMode,
       authRequired: authRequired(),
+      storageHealthy,
+      storageFailures: stats.storageFailures,
+      lastStorageError: stats.lastStorageError,
     })
     return true
   }

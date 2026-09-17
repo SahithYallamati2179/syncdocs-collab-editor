@@ -77,7 +77,20 @@ const server = Server.configure({
    */
   async onStoreDocument({ documentName, document }) {
     const state = Y.encodeStateAsUpdate(document)
-    await store.store(documentName, state, readTitle(document))
+
+    try {
+      await store.store(documentName, state, readTitle(document))
+    } catch (error) {
+      // Do not rethrow: live collaboration does not depend on the write, and
+      // killing the connection would turn a durability problem into an
+      // availability one. It is recorded so /health stops claiming everything
+      // is fine.
+      const message = (error as Error).message
+      metrics.storageFailed(message)
+      console.error(`[store] FAILED for ${documentName}: ${message}`)
+      return
+    }
+
     metrics.documentWritten(state.byteLength)
 
     const now = Date.now()

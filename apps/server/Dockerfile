@@ -37,13 +37,20 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Run as the unprivileged user the base image already provides.
-USER node
-
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/package.json ./package.json
 COPY --from=build --chown=node:node /app/apps/server/package.json ./apps/server/package.json
 COPY --from=build --chown=node:node /app/apps/server/dist ./apps/server/dist
+
+# The default file driver writes here. The directory has to be created while we
+# are still root and handed over, because /app itself is root-owned and the
+# unprivileged user cannot mkdir inside it at runtime. Without this the server
+# starts and serves /health quite happily, while every persist fails with
+# EACCES and documents live only in memory.
+RUN mkdir -p /app/.data && chown -R node:node /app/.data
+
+# Run as the unprivileged user the base image already provides.
+USER node
 
 # Host platforms inject their own PORT; config.ts already reads it.
 ENV PORT=1234

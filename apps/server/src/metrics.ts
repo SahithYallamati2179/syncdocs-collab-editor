@@ -15,6 +15,9 @@ export interface ServerStats {
   bytesWritten: number
   lastWriteAt: string | null
   authFailures: number
+  /** Persist failures since boot. Non-zero means documents are memory-only. */
+  storageFailures: number
+  lastStorageError: string | null
 }
 
 const startedAt = Date.now()
@@ -29,6 +32,8 @@ const counters = {
   bytesWritten: 0,
   lastWriteAt: null as number | null,
   authFailures: 0,
+  storageFailures: 0,
+  lastStorageError: null as string | null,
 }
 
 export const metrics = {
@@ -57,6 +62,17 @@ export const metrics = {
   authFailed(): void {
     counters.authFailures += 1
   },
+
+  /**
+   * A write that never lands is the worst kind of failure: the app looks
+   * healthy because the relay still holds every document in memory, and the
+   * loss only shows up after a restart. Counting these makes it visible in
+   * /health and /api/stats instead of scrolling past in the logs.
+   */
+  storageFailed(message: string): void {
+    counters.storageFailures += 1
+    counters.lastStorageError = message.slice(0, 300)
+  },
   snapshot(): ServerStats {
     return {
       startedAt: new Date(startedAt).toISOString(),
@@ -70,6 +86,8 @@ export const metrics = {
       bytesWritten: counters.bytesWritten,
       lastWriteAt: counters.lastWriteAt ? new Date(counters.lastWriteAt).toISOString() : null,
       authFailures: counters.authFailures,
+      storageFailures: counters.storageFailures,
+      lastStorageError: counters.lastStorageError,
     }
   },
 }
