@@ -404,6 +404,37 @@ export async function readImportedFile(file: File): Promise<ImportedDocument> {
 
 /* ----------------------------  applying  -------------------------------- */
 
+/**
+ * One top-level block of a document: a paragraph, heading, list, table and so
+ * on. `html` is what gets written back; `text` is what the diff compares, so
+ * that a block whose wording is unchanged is treated as unchanged even if its
+ * markup was re-emitted slightly differently.
+ */
+export interface DocumentBlock {
+  html: string
+  text: string
+}
+
+export function htmlToBlocks(html: string): DocumentBlock[] {
+  const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+  const blocks: DocumentBlock[] = []
+
+  for (const element of Array.from(parsed.body.children)) {
+    const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const outer = element.outerHTML
+    // An empty paragraph is spacing, not content, and showing a run of them in
+    // a review screen is noise the reviewer has to scroll past.
+    if (!text && !/^<(hr|img|table)/i.test(outer)) continue
+    blocks.push({ html: outer, text: text || outer })
+  }
+
+  return blocks
+}
+
+export function blocksToHtml(blocks: DocumentBlock[]): string {
+  return blocks.map((block) => block.html).join('\n')
+}
+
 export type ImportMode = 'append' | 'replace'
 
 /**

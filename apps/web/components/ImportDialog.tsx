@@ -5,13 +5,17 @@ import { useCallback, useRef, useState } from 'react'
 import {
   ACCEPTED_IMPORT_TYPES,
   applyImport,
-  chooseImportMode,
+  blocksToHtml,
+  htmlToBlocks,
+  isDocumentEmpty,
   MAX_IMPORT_BYTES,
   readImportedFile,
   SUPPORTED_IMPORT_LABEL,
+  type DocumentBlock,
 } from '@/lib/import'
 import { Icon } from '@/lib/icons'
 import { formatBytes } from '@/lib/metrics'
+import { ImportReview } from './ImportReview'
 import { Modal } from './Modal'
 
 interface ImportDialogProps {
@@ -24,15 +28,26 @@ interface ImportDialogProps {
   readOnly: boolean
 }
 
+interface Review {
+  fileName: string
+  before: DocumentBlock[]
+  after: DocumentBlock[]
+  /** Applied only if the person keeps at least one change. */
+  suggestedTitle: string
+}
+
 /**
- * Upload is a single action, not a wizard.
+ * Upload, then review.
  *
- * Choosing the file *is* the instruction — the file is read, placed and the
- * dialog closes. Where it goes is decided from the document's own state rather
- * than asked about (see chooseImportMode), and because the import lands as an
- * ordinary editing transaction, Ctrl+Z undoes the whole thing if the guess was
- * not what the person wanted. A confirmation step would have bought nothing
- * that undo does not already provide.
+ * Dropping a file into a document that already has content is a destructive
+ * act, and doing it silently means the person finds out what changed by
+ * reading the result. So the file is diffed against the document and every
+ * changed line is accepted or rejected individually before anything is
+ * written. Nothing lands until Apply.
+ *
+ * An empty document skips the review entirely — there is nothing to weigh up,
+ * and a diff consisting only of additions is a worse way to say "here is your
+ * file" than simply showing the file.
  */
 export function ImportDialog({
   editor,
@@ -45,7 +60,17 @@ export function ImportDialog({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [review, setReview] = useState<Review | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const finish = useCallback(
+    (message: string, suggestedTitle: string) => {
+      if (suggestedTitle && !title.trim()) onTitleChange(suggestedTitle)
+      onToast(message)
+      onClose()
+    },
+    [title, onTitleChange, onToast, onClose],
+  )
 
   const accept = useCallback(
     async (file: File | undefined) => {
@@ -55,39 +80,59 @@ export function ImportDialog({
 
       try {
         const parsed = await readImportedFile(file)
-        const content = parsed.json ?? parsed.html
 
-        if (!content || (typeof content === 'string' && !content.trim())) {
+        // Our own JSON export is a ProseMirror tree, not HTML, so there is no
+        // block list to diff against. It round-trips exactly by design.
+        if (parsed.json) {
+          if (!applyImport(editor, parsed.json, 'replace')) {
+            setError('The editor rejected that content.')
+            return
+          }
+          finish(`Imported ${file.name}`, parsed.title)
+          return
+        }
+
+        if (!parsed.html.trim()) {
           setError(`“${file.name}” had no content this editor could read.`)
           return
         }
 
-        const mode = chooseImportMode(editor)
-        if (!applyImport(editor, content, mode)) {
-          setError('The editor rejected that content. Try saving the file as Markdown instead.')
+        if (isDocumentEmpty(editor)) {
+          if (!applyImport(editor, parsed.html, 'replace')) {
+            setError('The editor rejected that content.')
+            return
+          }
+          finish(`Imported ${file.name}`, parsed.title)
           return
         }
 
-        // Only ever fills a blank — never renames a document someone has
-        // already titled.
-        if (parsed.title && !title.trim()) onTitleChange(parsed.title)
-
-        const note = parsed.warnings.length
-          ? ` (${parsed.warnings.length} formatting detail${parsed.warnings.length === 1 ? '' : 's'} simplified)`
-          : ''
-        onToast(
-          mode === 'replace'
-            ? `Imported ${file.name}${note}`
-            : `Added ${file.name} to the end${note}`,
-        )
-        onClose()
+        setReview({
+          fileName: file.name,
+          before: htmlToBlocks(editor.getHTML()),
+          after: htmlToBlocks(parsed.html),
+          suggestedTitle: parsed.title,
+        })
       } catch (cause) {
         setError((cause as Error).message)
       } finally {
         setBusy(null)
       }
     },
-    [editor, title, onTitleChange, onToast, onClose],
+    [editor, finish],
+  )
+
+  const applyReviewed = useCallback(
+    (blocks: DocumentBlock[]) => {
+      if (!editor || !review) return
+      // One replace, so the whole reviewed result lands as a single undoable
+      // step rather than as a stream of per-line edits.
+      if (!applyImport(editor, blocksToHtml(blocks), 'replace')) {
+        setError('The editor rejected that content.')
+        return
+      }
+      finish(`Applied changes from ${review.fileName}`, review.suggestedTitle)
+    },
+    [editor, review, finish],
   )
 
   if (readOnly) {
@@ -97,6 +142,25 @@ export function ImportDialog({
           You have view-only access to this document, and importing a file is an edit. Ask the
           owner for edit access, or start your own document and import it there.
         </div>
+      </Modal>
+    )
+  }
+
+  if (review) {
+    return (
+      <Modal title="Review changes" onClose={onClose} width={860}>
+        <ImportReview
+          before={review.before}
+          after={review.after}
+          fileName={review.fileName}
+          onCancel={() => setReview(null)}
+          onApply={applyReviewed}
+        />
+        {error && (
+          <div className="notice" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>
+            {error}
+          </div>
+        )}
       </Modal>
     )
   }
@@ -155,9 +219,10 @@ export function ImportDialog({
       </div>
 
       <span className="field__hint">
-        The file is placed for you — into an empty document it becomes the document, otherwise it
-        is added at the end. It lands as a normal edit, so it merges with whatever your
-        collaborators are typing, replicates to everyone, and <strong>Ctrl+Z</strong> undoes it.
+        Into an empty document the file is simply placed. Into a document that already has
+        content, you get a line-by-line diff and decide what to keep — nothing is written until
+        you apply it, and what you apply lands as one undoable edit that merges with whatever
+        your collaborators are typing.
       </span>
 
       {error && (
