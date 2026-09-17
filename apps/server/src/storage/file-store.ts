@@ -66,12 +66,19 @@ export class FileStore implements DocStore {
     }
   }
 
-  async snapshot(name: string, state: Uint8Array): Promise<void> {
+  async snapshot(name: string, state: Uint8Array, author: string): Promise<void> {
     assertSafeDocumentName(name)
     const dir = path.join(this.root, 'snapshots', name)
     await this.ensureDir(dir)
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     await fs.writeFile(path.join(dir, stamp + '.bin'), state)
+    // A sidecar rather than a longer filename: names are parsed back into ids,
+    // and putting user-supplied text in a path is how directory traversal and
+    // encoding bugs start.
+    await fs.writeFile(
+      path.join(dir, stamp + '.json'),
+      JSON.stringify({ author: author.slice(0, 80) }),
+    )
   }
 
   async list(): Promise<DocumentMeta[]> {
@@ -107,14 +114,27 @@ export class FileStore implements DocStore {
     const snapshots: SnapshotMeta[] = []
     for (const entry of entries) {
       if (!entry.endsWith('.bin')) continue
+      const id = entry.slice(0, -4)
       const stat = await fs.stat(path.join(dir, entry))
       snapshots.push({
-        id: entry.slice(0, -4),
+        id,
         createdAt: stat.mtime.toISOString(),
         bytes: stat.size,
+        author: await this.readSnapshotAuthor(dir, id),
       })
     }
     return snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
+
+  private async readSnapshotAuthor(dir: string, id: string): Promise<string> {
+    try {
+      const raw = await fs.readFile(path.join(dir, id + '.json'), 'utf8')
+      const parsed = JSON.parse(raw) as { author?: unknown }
+      return typeof parsed.author === 'string' ? parsed.author : ''
+    } catch {
+      // Snapshots written before author tracking have no sidecar at all.
+      return ''
+    }
   }
 
   async loadSnapshot(name: string, id: string): Promise<Uint8Array | null> {
@@ -148,6 +168,22 @@ export class FileStore implements DocStore {
     assertSafeDocumentName(name)
     await this.ensureDir(this.root)
     await fs.writeFile(path.join(this.root, name + '.acl.json'), JSON.stringify(acl, null, 2))
+  }
+
+  async remove(name: string): Promise<void> {
+    assertSafeDocumentName(name)
+    const targets = [
+      path.join(this.root, name + '.bin'),
+      path.join(this.root, name + '.meta.json'),
+      path.join(this.root, name + '.acl.json'),
+    ]
+    // force:true so a half-written document -- one with an ACL but no content
+    // yet, which is the normal state right after creation -- still deletes
+    // cleanly instead of failing on the first missing file.
+    for (const target of targets) {
+      await fs.rm(target, { force: true })
+    }
+    await fs.rm(path.join(this.root, 'snapshots', name), { recursive: true, force: true })
   }
 
   async close(): Promise<void> {

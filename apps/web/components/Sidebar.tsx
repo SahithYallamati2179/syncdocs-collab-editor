@@ -15,6 +15,7 @@ interface SidebarProps {
   onOpenSettings: () => void
   onOpenImport: () => void
   onOpenExport: () => void
+  onDelete: (id: string, title: string) => void
   onNavigate?: () => void
 }
 
@@ -24,25 +25,45 @@ function NavItem({
   meta,
   active,
   onClick,
+  onDelete,
 }: {
   icon: IconName
   label: string
   meta?: string
   active?: boolean
   onClick: () => void
+  /** When given, a delete affordance appears on hover or keyboard focus. */
+  onDelete?: () => void
 }) {
   return (
-    <button
-      type="button"
-      className="nav-item"
-      aria-current={active ? 'true' : undefined}
-      onClick={onClick}
-      title={label}
-    >
-      <Icon name={icon} size={15} />
-      <span className="nav-item__label">{label}</span>
-      {meta && <span className="nav-item__meta">{meta}</span>}
-    </button>
+    <div className="nav-item-row">
+      <button
+        type="button"
+        className="nav-item"
+        aria-current={active ? 'true' : undefined}
+        onClick={onClick}
+        title={label}
+      >
+        <Icon name={icon} size={15} />
+        <span className="nav-item__label">{label}</span>
+        {meta && <span className="nav-item__meta">{meta}</span>}
+      </button>
+
+      {onDelete && (
+        <button
+          type="button"
+          className="nav-item__delete"
+          title={`Delete ${label}`}
+          aria-label={`Delete ${label}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDelete()
+          }}
+        >
+          <Icon name="trash" size={13} />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -61,6 +82,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenImport,
   onOpenExport,
+  onDelete,
   onNavigate,
 }: SidebarProps) {
   const router = useRouter()
@@ -104,6 +126,7 @@ export function Sidebar({
             meta={formatBytes(document.bytes)}
             active={document.name === activeId}
             onClick={() => open(document.name)}
+            onDelete={() => onDelete(document.name, document.title || DEFAULT_TITLE)}
           />
         ))}
 

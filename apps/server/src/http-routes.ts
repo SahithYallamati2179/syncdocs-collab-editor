@@ -3,6 +3,7 @@ import {
   AccessDenied,
   addMember,
   authorize,
+  deleteDocument,
   filterAccessible,
   isOwner,
   removeMember,
@@ -154,6 +155,26 @@ export async function handleHttpRequest(
       send(response, 200, { documents })
     } catch (error) {
       send(response, 500, { error: (error as Error).message })
+    }
+    return true
+  }
+
+  // /api/documents/:name  (DELETE only; the listing above handles GET)
+  const documentMatch = route.match(/^\/api\/documents\/([^/]+)$/)
+  if (documentMatch && method === 'DELETE') {
+    const name = decodeURIComponent(documentMatch[1])
+    const user = await identify(request)
+
+    if (authRequired() && !user) {
+      send(response, 401, { error: 'Your session has expired. Sign in again.' })
+      return true
+    }
+
+    try {
+      await deleteDocument(store, name, user as AuthedUser)
+      send(response, 200, { deleted: name })
+    } catch (error) {
+      send(response, statusFor(error, user), { error: (error as Error).message })
     }
     return true
   }

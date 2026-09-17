@@ -8,8 +8,8 @@ import { Editor } from '@/components/Editor'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { PromptDialog } from '@/components/PromptDialog'
 import { StatusStrip } from '@/components/StatusStrip'
+import { PresenceAvatar } from '@/components/TopBar'
 import type { CollabSession } from '@/lib/collab'
-import { initialsFor } from '@/lib/colors'
 import { isValidDocumentId } from '@/lib/documents'
 import type { PresencePeer } from '@/lib/hooks'
 import { Icon } from '@/lib/icons'
@@ -37,7 +37,17 @@ export default function DocumentPage() {
 
   return (
     <AppShell documentId={documentId} allowGuest>
-      {({ session, identity, peers, snapshot, setEditor, editor, toast, readOnly }) => (
+      {({
+        session,
+        identity,
+        peers,
+        snapshot,
+        setEditor,
+        editor,
+        toast,
+        readOnly,
+        openComments,
+      }) => (
         <DocumentView
           documentId={documentId}
           session={session}
@@ -51,6 +61,7 @@ export default function DocumentPage() {
           setDialog={setDialog}
           toast={toast}
           readOnly={readOnly}
+          onOpenComments={openComments}
         />
       )}
     </AppShell>
@@ -70,6 +81,7 @@ interface DocumentViewProps {
   setDialog: (dialog: EditorDialog) => void
   toast: (message: string) => void
   readOnly: boolean
+  onOpenComments: () => void
 }
 
 function DocumentView({
@@ -85,11 +97,26 @@ function DocumentView({
   setDialog,
   toast,
   readOnly,
+  onOpenComments,
 }: DocumentViewProps) {
   const onReady = useCallback(
     (instance: TiptapEditor | null) => setEditor(instance),
     [setEditor],
   )
+
+  /**
+   * Hand the selection over to the comments panel.
+   *
+   * The composer lives in the panel, so this opens it and focuses the box;
+   * the panel reads the editor's live selection itself and attaches the
+   * comment to it on submit.
+   */
+  const onAddComment = useCallback(() => {
+    onOpenComments()
+    window.setTimeout(() => {
+      document.querySelector<HTMLTextAreaElement>('.panel__foot .textarea')?.focus()
+    }, 60)
+  }, [onOpenComments])
 
   const characters = snapshot.footprint[snapshot.footprint.length - 1]?.chars ?? 0
 
@@ -111,6 +138,7 @@ function DocumentView({
             peers={peerCount}
             onInsertLink={() => setDialog('link')}
             onInsertImage={() => setDialog('image')}
+            onAddComment={onAddComment}
           />
         </div>
       )}
@@ -129,14 +157,7 @@ function DocumentView({
               Active collaborators
               <span className="presence__stack">
                 {peers.slice(0, 4).map((peer) => (
-                  <span
-                    key={peer.clientId}
-                    className="avatar avatar--sm"
-                    style={{ background: peer.color, borderWidth: 2 }}
-                    title={peer.isSelf ? `${peer.name} (you)` : peer.name}
-                  >
-                    {initialsFor(peer.name)}
-                  </span>
+                  <PresenceAvatar key={peer.clientId} peer={peer} size="sm" />
                 ))}
               </span>
             </span>

@@ -59,6 +59,8 @@ const PATHS = {
   upload: 'M12 20V8M7 12l5-5 5 5M4 4h16',
   print: 'M7 8V3h10v5M7 18H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M7 15h10v6H7z',
   copy: 'M9 9a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+  quote: 'M7 7H4v5h3c0 2-1 3-3 3v2c3 0 5-2 5-5V7zM17 7h-3v5h3c0 2-1 3-3 3v2c3 0 5-2 5-5V7z',
+  comment: 'M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z',
 } as const
 
 export type IconName = keyof typeof PATHS

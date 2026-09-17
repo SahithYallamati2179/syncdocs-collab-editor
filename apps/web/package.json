@@ -30,6 +30,7 @@
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "jszip": "^3.10.2",
     "mammoth": "^1.12.3",
     "next": "^15.1.6",
     "react": "^19.0.0",

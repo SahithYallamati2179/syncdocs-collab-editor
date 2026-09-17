@@ -27,11 +27,34 @@ export function Modal({
 }: ModalProps) {
   const cardRef = useRef<HTMLDivElement>(null)
 
+  // Held in a ref so the Escape listener below always calls the current
+  // handler without having to re-subscribe when its identity changes.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  /**
+   * Move focus into the dialog, exactly once.
+   *
+   * This deliberately has an empty dependency list. It used to depend on
+   * `onClose`, which callers pass as an inline arrow -- a new function on every
+   * render of the parent. The parent re-renders on a timer (server stats poll
+   * every few seconds, plus every metrics update), so the effect re-ran
+   * constantly and each run called focus() again, throwing the caret back to
+   * the first field in the dialog. Typing an email address into the Share
+   * dialog was close to impossible: the cursor jumped out mid-word.
+   */
+  useEffect(() => {
+    const focusable = cardRef.current?.querySelector<HTMLElement>(
+      'input, textarea, button, [href], select',
+    )
+    focusable?.focus()
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation()
-        onClose()
+        closeRef.current()
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -39,16 +62,11 @@ export function Modal({
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
-    const focusable = cardRef.current?.querySelector<HTMLElement>(
-      'input, textarea, button, [href], select',
-    )
-    focusable?.focus()
-
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div

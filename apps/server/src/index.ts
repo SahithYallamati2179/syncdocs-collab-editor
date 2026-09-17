@@ -22,6 +22,22 @@ function readTitle(document: Y.Doc): string {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 120) : ''
 }
 
+/**
+ * Who edited last, for the version history view.
+ *
+ * Taken from the document's own meta map rather than from the connection that
+ * happened to trigger the write: persistence is debounced and coalesced, so
+ * the socket that causes a flush is frequently not the one that made the edit.
+ * The client stamps this as part of the edit itself, which means it merges and
+ * replicates like everything else.
+ */
+function readLastEditor(document: Y.Doc): string {
+  const value = document.getMap('meta').get('lastEditedBy')
+  if (!value || typeof value !== 'object') return ''
+  const name = (value as { name?: unknown }).name
+  return typeof name === 'string' ? name.trim().slice(0, 80) : ''
+}
+
 const server = Server.configure({
   port: config.port,
   name: 'collab-editor-sync',
@@ -105,7 +121,7 @@ const server = Server.configure({
     const previous = lastSnapshotAt.get(documentName) ?? 0
     if (now - previous >= config.snapshotIntervalMs) {
       lastSnapshotAt.set(documentName, now)
-      await store.snapshot(documentName, state)
+      await store.snapshot(documentName, state, readLastEditor(document))
       metrics.snapshotWritten()
       console.log(`[snapshot] ${documentName} (${state.byteLength} bytes)`)
     }

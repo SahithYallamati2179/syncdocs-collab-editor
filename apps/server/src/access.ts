@@ -225,6 +225,25 @@ export async function setLinkAccess(
 }
 
 /**
+ * Delete a document outright. Owner only.
+ *
+ * Note this goes through requireOwner rather than any softer check: an editor
+ * invited to collaborate on a document has been trusted with its contents, not
+ * with its existence. Link-level edit access emphatically does not carry the
+ * right to destroy the thing the link points at.
+ */
+export async function deleteDocument(
+  store: DocStore,
+  documentName: string,
+  user: AuthedUser,
+): Promise<void> {
+  if (authRequired()) {
+    await requireOwner(store, documentName, user, 'delete this document')
+  }
+  await store.remove(documentName)
+}
+
+/**
  * Filter a document listing down to what this user may see. Without this the
  * explorer would leak every document name on the server to every signed-in
  * user, which is an access-control hole even though the content stays closed.

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { initialsFor } from '@/lib/colors'
-import type { PresencePeer } from '@/lib/hooks'
+import type { PresencePeer, PresenceStatus } from '@/lib/hooks'
 import { Icon } from '@/lib/icons'
 import type { Identity } from '@/lib/identity'
 import type { MetricsSnapshot } from '@/lib/metrics'
@@ -27,6 +27,56 @@ interface TopBarProps {
   /** Viewing without an account, via a shared link. */
   isGuest: boolean
   onSignIn: () => void
+}
+
+const STATUS_LABEL: Record<PresenceStatus, string> = {
+  online: 'Online',
+  away: 'Away',
+  offline: 'Offline',
+}
+
+/** "Active 4m ago", for a peer who has gone idle. */
+function sinceLabel(at: number | null): string {
+  if (at === null) return ''
+  const minutes = Math.floor((Date.now() - at) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`
+}
+
+export function StatusDot({ status }: { status: PresenceStatus }) {
+  return (
+    <span
+      className="status-dot"
+      data-status={status}
+      title={STATUS_LABEL[status]}
+      aria-label={STATUS_LABEL[status]}
+    />
+  )
+}
+
+/** An avatar with its online/away/offline state attached to the corner. */
+export function PresenceAvatar({
+  peer,
+  size = 'md',
+}: {
+  peer: PresencePeer
+  size?: 'sm' | 'md'
+}) {
+  return (
+    <span className="avatar-wrap">
+      <span
+        className={size === 'sm' ? 'avatar avatar--sm' : 'avatar'}
+        style={{ background: peer.color }}
+        title={peer.isSelf ? `${peer.name} (you)` : peer.name}
+        data-status={peer.status}
+      >
+        {initialsFor(peer.name)}
+      </span>
+      <StatusDot status={peer.status} />
+    </span>
+  )
 }
 
 function SaveChip({ snapshot }: { snapshot: MetricsSnapshot }) {
@@ -84,6 +134,7 @@ export function TopBar({
         : 'Offline'
 
   const others = peers.filter((peer) => !peer.isSelf)
+  const activeOthers = others.filter((peer) => peer.status === 'online')
 
   return (
     <header className="topbar">
@@ -165,18 +216,15 @@ export function TopBar({
         >
           <span className="presence__stack">
             {peers.slice(0, 3).map((peer) => (
-              <span
-                key={peer.clientId}
-                className="avatar"
-                style={{ background: peer.color }}
-                title={peer.isSelf ? `${peer.name} (you)` : peer.name}
-              >
-                {initialsFor(peer.name)}
-              </span>
+              <PresenceAvatar key={peer.clientId} peer={peer} />
             ))}
           </span>
           <span className="presence__label">
-            {others.length > 0 ? `${others.length} editing` : 'only you'}
+            {others.length === 0
+              ? 'only you'
+              : activeOthers.length === others.length
+                ? `${others.length} editing`
+                : `${activeOthers.length} of ${others.length} active`}
           </span>
         </button>
 
@@ -185,11 +233,17 @@ export function TopBar({
             {peers.length === 0 && <div className="empty">Nobody connected yet.</div>}
             {peers.map((peer) => (
               <div className="popover__row" key={peer.clientId}>
-                <span className="avatar avatar--sm" style={{ background: peer.color }}>
-                  {initialsFor(peer.name)}
-                </span>
+                <PresenceAvatar peer={peer} size="sm" />
                 <span className="popover__name">{peer.name}</span>
-                <span className="popover__tag">{peer.isSelf ? 'you' : 'editing'}</span>
+                <span className="popover__tag" data-status={peer.status}>
+                  {peer.isSelf
+                    ? 'you'
+                    : peer.status === 'online'
+                      ? 'Online'
+                      : peer.status === 'away'
+                        ? `Away · ${sinceLabel(peer.lastActiveAt)}`
+                        : 'Offline'}
+                </span>
               </div>
             ))}
           </div>

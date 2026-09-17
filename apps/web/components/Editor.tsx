@@ -18,8 +18,9 @@ import TextStyle from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { CollabSession } from '@/lib/collab'
+import { CommentMark } from '@/lib/comment-mark'
 import { FontSize } from '@/lib/font-size'
 import type { Identity } from '@/lib/identity'
 
@@ -43,8 +44,32 @@ interface EditorProps {
  */
 const PING_INTERVAL_MS = 50
 
+/** How often the "who edited last" stamp may be rewritten into the document. */
+const AUTHOR_STAMP_INTERVAL_MS = 5_000
+
 export function Editor({ session, identity, onReady, readOnly = false }: EditorProps) {
   const lastPingRef = useRef(0)
+  const lastStampRef = useRef(0)
+
+  /**
+   * Record who edited last, inside the document itself.
+   *
+   * It lives in the Y.Doc meta map rather than being inferred server-side,
+   * because persistence is debounced and coalesced -- the connection that
+   * triggers a flush is often not the one that made the edit. Written at most
+   * once every few seconds, since this is a CRDT update like any other and
+   * stamping it per keystroke would bloat the document for no extra fidelity.
+   */
+  const stampAuthor = useCallback(() => {
+    const now = Date.now()
+    if (now - lastStampRef.current < AUTHOR_STAMP_INTERVAL_MS) return
+    lastStampRef.current = now
+    session.doc.getMap('meta').set('lastEditedBy', {
+      id: identity.id,
+      name: identity.name,
+      at: now,
+    })
+  }, [session, identity.id, identity.name])
 
   const editor = useEditor(
     {
@@ -83,6 +108,7 @@ export function Editor({ session, identity, onReady, readOnly = false }: EditorP
           protocols: ['http', 'https', 'mailto'],
         }),
         Image.configure({ inline: false, allowBase64: false }),
+        CommentMark,
         Table.configure({ resizable: true }),
         TableRow,
         TableHeader,
@@ -108,13 +134,15 @@ export function Editor({ session, identity, onReady, readOnly = false }: EditorP
 
       onUpdate: ({ editor: instance }) => {
         session.reportCharCount(instance.storage.characterCount.characters())
+        stampAuthor()
+        session.markActive()
       },
 
       editorProps: {
         attributes: { class: 'editor-surface', spellcheck: 'true' },
       },
     },
-    [session, identity.name, identity.color],
+    [session, identity.name, identity.color, stampAuthor],
   )
 
   // The role can arrive after the editor is built -- the access call and the

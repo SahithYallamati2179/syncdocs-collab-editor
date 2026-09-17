@@ -25,6 +25,15 @@ export interface CommentRecord {
   body: string
   createdAt: number
   resolved: boolean
+  /**
+   * The text that was selected when the comment was made.
+   *
+   * Stored as a copy, not as a pointer: the live anchor is the mark in the
+   * prose, and this is what the panel shows so a thread still reads sensibly
+   * after the underlying sentence has been rewritten — or deleted, which takes
+   * the mark with it and would otherwise leave a comment about nothing.
+   */
+  quote: string
 }
 
 export interface CommentThread extends CommentRecord {
@@ -49,6 +58,7 @@ function toRecord(entry: Y.Map<unknown>): CommentRecord | null {
     body: String(entry.get('body') ?? ''),
     createdAt: Number(entry.get('createdAt') ?? 0),
     resolved: Boolean(entry.get('resolved')),
+    quote: String(entry.get('quote') ?? ''),
   }
 }
 
@@ -64,6 +74,7 @@ export function addComment(
   identity: Identity,
   body: string,
   parentId: string | null = null,
+  quote = '',
 ): string | null {
   const text = body.trim()
   if (!text) return null
@@ -81,6 +92,9 @@ export function addComment(
     entry.set('body', text)
     entry.set('createdAt', Date.now())
     entry.set('resolved', false)
+    // Trimmed on the way in: a comment on three paragraphs of selected text
+    // should not put three paragraphs in the sidebar.
+    entry.set('quote', quote.replace(/\s+/g, ' ').trim().slice(0, 240))
     commentsArray(doc).push([entry])
   })
   return id

@@ -9,6 +9,7 @@ interface EditorToolbarProps {
   peers: number
   onInsertLink: () => void
   onInsertImage: () => void
+  onAddComment: () => void
 }
 
 interface ToolProps {
@@ -49,6 +50,7 @@ export function EditorToolbar({
   peers,
   onInsertLink,
   onInsertImage,
+  onAddComment,
 }: EditorToolbarProps) {
   // TipTap mutates the editor in place, so React has no signal to re-render on.
   // Subscribing to transactions is what keeps the active states truthful.
@@ -83,6 +85,10 @@ export function EditorToolbar({
     else if (value === 'quote') chain.toggleBlockquote().run()
     else chain.setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 }).run()
   }
+
+  // The toolbar already re-renders on every transaction and selection change,
+  // so this is simply read fresh rather than tracked in state.
+  const hasSelection = Boolean(editor && !editor.state.selection.empty)
 
   const currentSize = editor?.getAttributes('textStyle').fontSize ?? '15px'
   const currentFamily = editor?.getAttributes('textStyle').fontFamily ?? ''
@@ -273,6 +279,20 @@ export function EditorToolbar({
           }
         />
         <Tool icon="image" title="Insert image" disabled={disabled} onClick={onInsertImage} />
+
+        <span className="toolbar__sep" aria-hidden />
+
+        <Tool
+          icon="comment"
+          title={
+            hasSelection
+              ? 'Comment on the selected text'
+              : 'Select some text first, then comment on it'
+          }
+          active={editor?.isActive('comment')}
+          disabled={disabled || !hasSelection}
+          onClick={onAddComment}
+        />
 
         <span className="toolbar__sep" aria-hidden />
 

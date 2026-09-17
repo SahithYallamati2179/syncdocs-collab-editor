@@ -1,15 +1,14 @@
 'use client'
 
 import type { Editor } from '@tiptap/react'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   ACCEPTED_IMPORT_TYPES,
   applyImport,
+  chooseImportMode,
   MAX_IMPORT_BYTES,
   readImportedFile,
   SUPPORTED_IMPORT_LABEL,
-  type ImportedDocument,
-  type ImportMode,
 } from '@/lib/import'
 import { Icon } from '@/lib/icons'
 import { formatBytes } from '@/lib/metrics'
@@ -25,11 +24,16 @@ interface ImportDialogProps {
   readOnly: boolean
 }
 
-interface Staged {
-  file: File
-  parsed: ImportedDocument
-}
-
+/**
+ * Upload is a single action, not a wizard.
+ *
+ * Choosing the file *is* the instruction — the file is read, placed and the
+ * dialog closes. Where it goes is decided from the document's own state rather
+ * than asked about (see chooseImportMode), and because the import lands as an
+ * ordinary editing transaction, Ctrl+Z undoes the whole thing if the guess was
+ * not what the person wanted. A confirmation step would have bought nothing
+ * that undo does not already provide.
+ */
 export function ImportDialog({
   editor,
   title,
@@ -38,61 +42,57 @@ export function ImportDialog({
   onTitleChange,
   readOnly,
 }: ImportDialogProps) {
-  const [staged, setStaged] = useState<Staged | null>(null)
-  const [mode, setMode] = useState<ImportMode>('append')
-  const [useFileTitle, setUseFileTitle] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [reading, setReading] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const accept = async (file: File | undefined) => {
-    if (!file) return
-    setError(null)
-    setReading(true)
-    try {
-      const parsed = await readImportedFile(file)
-      setStaged({ file, parsed })
-      // Offer the file's own title only when it actually has one and the
-      // document is still untitled — never silently overwrite a name someone
-      // chose, and never propose the placeholder filename over a real title.
-      setUseFileTitle(Boolean(parsed.title) && !title.trim())
-    } catch (cause) {
-      setStaged(null)
-      setError((cause as Error).message)
-    } finally {
-      setReading(false)
-    }
-  }
+  const accept = useCallback(
+    async (file: File | undefined) => {
+      if (!file || !editor) return
+      setError(null)
+      setBusy(file.name)
 
-  const confirm = () => {
-    if (!editor || !staged) return
-    const { parsed } = staged
-    const content = parsed.json ?? parsed.html
+      try {
+        const parsed = await readImportedFile(file)
+        const content = parsed.json ?? parsed.html
 
-    if (!content || (typeof content === 'string' && !content.trim())) {
-      setError('That file had no content this editor could read.')
-      return
-    }
+        if (!content || (typeof content === 'string' && !content.trim())) {
+          setError(`“${file.name}” had no content this editor could read.`)
+          return
+        }
 
-    const ok = applyImport(editor, content, mode)
-    if (!ok) {
-      setError('The editor rejected that content. Try exporting the file as Markdown instead.')
-      return
-    }
+        const mode = chooseImportMode(editor)
+        if (!applyImport(editor, content, mode)) {
+          setError('The editor rejected that content. Try saving the file as Markdown instead.')
+          return
+        }
 
-    if (useFileTitle && parsed.title) onTitleChange(parsed.title)
-    onToast(
-      mode === 'replace'
-        ? `Replaced the document with ${staged.file.name}`
-        : `Added ${staged.file.name} to the end`,
-    )
-    onClose()
-  }
+        // Only ever fills a blank — never renames a document someone has
+        // already titled.
+        if (parsed.title && !title.trim()) onTitleChange(parsed.title)
+
+        const note = parsed.warnings.length
+          ? ` (${parsed.warnings.length} formatting detail${parsed.warnings.length === 1 ? '' : 's'} simplified)`
+          : ''
+        onToast(
+          mode === 'replace'
+            ? `Imported ${file.name}${note}`
+            : `Added ${file.name} to the end${note}`,
+        )
+        onClose()
+      } catch (cause) {
+        setError((cause as Error).message)
+      } finally {
+        setBusy(null)
+      }
+    },
+    [editor, title, onTitleChange, onToast, onClose],
+  )
 
   if (readOnly) {
     return (
-      <Modal title="Upload a document" onClose={onClose} width={560}>
+      <Modal title="Upload a document" onClose={onClose} width={520}>
         <div className="notice">
           You have view-only access to this document, and importing a file is an edit. Ask the
           owner for edit access, or start your own document and import it there.
@@ -102,28 +102,7 @@ export function ImportDialog({
   }
 
   return (
-    <Modal
-      title="Upload a document"
-      onClose={onClose}
-      width={560}
-      footer={
-        <>
-          <span className="topbar__spacer" />
-          <button type="button" className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            disabled={!staged || !editor}
-            onClick={confirm}
-          >
-            <Icon name="upload" size={15} />
-            {mode === 'replace' ? 'Replace document' : 'Add to document'}
-          </button>
-        </>
-      }
-    >
+    <Modal title="Upload a document" onClose={onClose} width={520}>
       <div
         className="dropzone"
         data-dragging={dragging ? 'true' : 'false'}
@@ -135,99 +114,51 @@ export function ImportDialog({
         onDrop={(event) => {
           event.preventDefault()
           setDragging(false)
-          accept(event.dataTransfer.files[0])
+          void accept(event.dataTransfer.files[0])
         }}
       >
         <span className="dropzone__icon">
-          <Icon name="upload" size={20} />
+          <Icon name={busy ? 'clock' : 'upload'} size={20} />
         </span>
-        <strong>{dragging ? 'Drop it here' : 'Drag a file here'}</strong>
-        <span className="dropzone__hint">{SUPPORTED_IMPORT_LABEL}</span>
-        <button type="button" className="btn btn--soft" onClick={() => inputRef.current?.click()}>
-          Choose a file
-        </button>
+
+        {busy ? (
+          <>
+            <strong>Reading {busy}…</strong>
+            <span className="dropzone__hint">This stays on your machine.</span>
+          </>
+        ) : (
+          <>
+            <strong>{dragging ? 'Drop it here' : 'Drag a file here'}</strong>
+            <span className="dropzone__hint">{SUPPORTED_IMPORT_LABEL}</span>
+            <button
+              type="button"
+              className="btn btn--soft"
+              onClick={() => inputRef.current?.click()}
+            >
+              Choose a file
+            </button>
+            <span className="dropzone__hint">Up to {formatBytes(MAX_IMPORT_BYTES)}</span>
+          </>
+        )}
+
         <input
           ref={inputRef}
           type="file"
           className="sr-only"
           accept={ACCEPTED_IMPORT_TYPES}
           onChange={(event) => {
-            accept(event.target.files?.[0])
+            void accept(event.target.files?.[0])
             // Reset so choosing the same file twice still fires a change event.
             event.target.value = ''
           }}
         />
-        <span className="dropzone__hint">Up to {formatBytes(MAX_IMPORT_BYTES)}</span>
       </div>
 
-      {reading && <div className="empty">Reading the file…</div>}
-
-      {staged && (
-        <>
-          <div className="member-row">
-            <span className="avatar avatar--sm" style={{ background: 'var(--primary)' }}>
-              <Icon name="file" size={11} />
-            </span>
-            <span className="member-row__email">{staged.file.name}</span>
-            <span className="member-row__tag">{formatBytes(staged.file.size)}</span>
-          </div>
-
-          <div className="field">
-            <span className="field__label">Where it goes</span>
-            <div className="choice-row">
-              <button
-                type="button"
-                className="choice"
-                data-active={mode === 'append' ? 'true' : 'false'}
-                aria-pressed={mode === 'append'}
-                onClick={() => setMode('append')}
-              >
-                <strong>Add to the end</strong>
-                <span>Keeps what is already here and appends the file below it.</span>
-              </button>
-              <button
-                type="button"
-                className="choice"
-                data-active={mode === 'replace' ? 'true' : 'false'}
-                aria-pressed={mode === 'replace'}
-                onClick={() => setMode('replace')}
-              >
-                <strong>Replace everything</strong>
-                <span>Clears the document first. Undo brings it straight back.</span>
-              </button>
-            </div>
-          </div>
-
-          {staged.parsed.title && (
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={useFileTitle}
-                onChange={(event) => setUseFileTitle(event.target.checked)}
-              />
-              <span>
-                Rename this document to <strong>{staged.parsed.title}</strong>
-              </span>
-            </label>
-          )}
-
-          {staged.parsed.warnings.length > 0 && (
-            <div className="notice">
-              <strong>Some formatting was simplified.</strong>
-              <ul className="notice__list">
-                {staged.parsed.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <span className="field__hint">
-            The import lands as a normal edit: it merges with whatever your collaborators are
-            typing at that moment, it replicates to everyone, and Ctrl+Z undoes it.
-          </span>
-        </>
-      )}
+      <span className="field__hint">
+        The file is placed for you — into an empty document it becomes the document, otherwise it
+        is added at the end. It lands as a normal edit, so it merges with whatever your
+        collaborators are typing, replicates to everyone, and <strong>Ctrl+Z</strong> undoes it.
+      </span>
 
       {error && (
         <div className="notice" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>

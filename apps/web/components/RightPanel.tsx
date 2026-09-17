@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import type { Editor } from '@tiptap/react'
+import { useEffect, useState } from 'react'
 import type { CollabSession } from '@/lib/collab'
+import { revealComment } from '@/lib/comment-mark'
 import { initialsFor } from '@/lib/colors'
 import {
   addComment,
@@ -19,6 +21,7 @@ interface RightPanelProps {
   identity: Identity
   threads: CommentThread[]
   snapshot: MetricsSnapshot
+  editor: Editor | null
   onClose: () => void
 }
 
@@ -26,10 +29,12 @@ function CommentCard({
   thread,
   session,
   identity,
+  editor,
 }: {
   thread: CommentThread
   session: CollabSession
   identity: Identity
+  editor: Editor | null
 }) {
   const [replying, setReplying] = useState(false)
   const [draft, setDraft] = useState('')
@@ -50,6 +55,24 @@ function CommentCard({
         <span className="comment__author">{thread.authorName}</span>
         <span className="comment__time">{relativeTime(thread.createdAt)}</span>
       </div>
+
+      {thread.quote && (
+        <button
+          type="button"
+          className="comment__quote"
+          title="Jump to this text in the document"
+          onClick={() => {
+            if (!revealComment(thread.id)) {
+              // The marked text is gone, which is a normal outcome: someone
+              // deleted the sentence this thread was about.
+              window.alert('The text this comment was attached to is no longer in the document.')
+            }
+          }}
+        >
+          <Icon name="quote" size={12} />
+          <span>{thread.quote}</span>
+        </button>
+      )}
 
       <div className="comment__body">{thread.body}</div>
 
@@ -105,7 +128,12 @@ function CommentCard({
           <button
             type="button"
             className="link-btn"
-            onClick={() => setResolved(session.doc, thread.id, !thread.resolved)}
+            onClick={() => {
+              const next = !thread.resolved
+              setResolved(session.doc, thread.id, next)
+              // Keep the highlight in step with the thread's state.
+              editor?.commands.setCommentResolved(thread.id, next)
+            }}
           >
             {thread.resolved ? 'Reopen' : 'Resolve'}
           </button>
@@ -114,7 +142,12 @@ function CommentCard({
               type="button"
               className="link-btn"
               style={{ color: 'var(--ink-3)' }}
-              onClick={() => deleteComment(session.doc, thread.id)}
+              onClick={() => {
+                deleteComment(session.doc, thread.id)
+                // Otherwise the highlight outlives the comment and nothing in
+                // the panel explains why that text is shaded.
+                editor?.commands.unsetCommentMark(thread.id)
+              }}
             >
               Delete
             </button>
@@ -130,18 +163,51 @@ export function RightPanel({
   identity,
   threads,
   snapshot,
+  editor,
   onClose,
 }: RightPanelProps) {
   const [tab, setTab] = useState<'comments' | 'activity'>('comments')
   const [draft, setDraft] = useState('')
   const [showResolved, setShowResolved] = useState(false)
+  const [selection, setSelection] = useState('')
 
   const visible = showResolved ? threads : threads.filter((thread) => !thread.resolved)
   const unresolved = threads.filter((thread) => !thread.resolved).length
 
+  /**
+   * Track what is selected in the editor so the composer can offer to attach
+   * the comment to it. Read here rather than at submit time because the
+   * selection is gone by then -- clicking into the textarea blurs the editor.
+   */
+  useEffect(() => {
+    if (!editor) return
+    const read = () => {
+      const { from, to, empty } = editor.state.selection
+      setSelection(empty ? '' : editor.state.doc.textBetween(from, to, ' ').trim())
+    }
+    read()
+    editor.on('selectionUpdate', read)
+    editor.on('transaction', read)
+    return () => {
+      editor.off('selectionUpdate', read)
+      editor.off('transaction', read)
+    }
+  }, [editor])
+
   const submit = () => {
     if (!session || !draft.trim()) return
-    addComment(session.doc, identity, draft)
+
+    // Capture before the comment is created: applying the mark needs the range
+    // that is selected right now.
+    const range = editor && !editor.state.selection.empty ? editor.state.selection : null
+    const quote = range ? selection : ''
+
+    const id = addComment(session.doc, identity, draft, null, quote)
+    if (id && range && editor) {
+      // One chain so the mark lands as a single undoable step alongside the
+      // selection restore, rather than leaving the caret somewhere surprising.
+      editor.chain().focus().setTextSelection({ from: range.from, to: range.to }).setCommentMark(id).run()
+    }
     setDraft('')
   }
 
@@ -197,6 +263,7 @@ export function RightPanel({
                 <CommentCard
                   key={thread.id}
                   thread={thread}
+                  editor={editor}
                   session={session}
                   identity={identity}
                 />
@@ -239,9 +306,20 @@ export function RightPanel({
       {tab === 'comments' && (
         <div className="panel__foot">
           <div className="composer">
+            {selection ? (
+              <div className="composer__target" title={selection}>
+                <Icon name="quote" size={12} />
+                <span>{selection}</span>
+              </div>
+            ) : (
+              <div className="composer__target composer__target--empty">
+                Select text in the document to attach a comment to it.
+              </div>
+            )}
+
             <textarea
               className="textarea"
-              placeholder="Add a comment…"
+              placeholder={selection ? 'Comment on the selected text…' : 'Add a comment…'}
               value={draft}
               disabled={!session}
               onChange={(event) => setDraft(event.target.value)}
@@ -255,7 +333,7 @@ export function RightPanel({
               onClick={submit}
               disabled={!session || !draft.trim()}
             >
-              Comment
+              {selection ? 'Comment on selection' : 'Comment'}
             </button>
           </div>
         </div>

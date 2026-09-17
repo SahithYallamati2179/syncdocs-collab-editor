@@ -18,7 +18,8 @@ const LIST_SQL =
   'from documents order by updated_at desc limit 100'
 
 const LIST_SNAPSHOTS_SQL =
-  'select id::text as id, created_at, octet_length(state)::text as bytes ' +
+  'select id::text as id, created_at, octet_length(state)::text as bytes, ' +
+  "coalesce(author, '') as author " +
   'from document_snapshots where document_name = $1 order by created_at desc limit 50'
 
 /**
@@ -55,11 +56,11 @@ export class PostgresStore implements DocStore {
     await this.pool.query(UPSERT_SQL, [name, title || DEFAULT_TITLE, Buffer.from(state)])
   }
 
-  async snapshot(name: string, state: Uint8Array): Promise<void> {
+  async snapshot(name: string, state: Uint8Array, author: string): Promise<void> {
     assertSafeDocumentName(name)
     await this.pool.query(
-      'insert into document_snapshots (document_name, state) values ($1, $2)',
-      [name, Buffer.from(state)],
+      'insert into document_snapshots (document_name, state, author) values ($1, $2, $3)',
+      [name, Buffer.from(state), author.slice(0, 80)],
     )
   }
 
@@ -85,12 +86,14 @@ export class PostgresStore implements DocStore {
       id: string
       created_at: Date
       bytes: string
+      author: string
     }>(LIST_SNAPSHOTS_SQL, [name])
 
     return result.rows.map((row) => ({
       id: row.id,
       createdAt: row.created_at.toISOString(),
       bytes: Number(row.bytes),
+      author: row.author ?? '',
     }))
   }
 
@@ -141,6 +144,27 @@ export class PostgresStore implements DocStore {
         'link_access = excluded.link_access',
       [name, acl.ownerId, acl.ownerEmail, JSON.stringify(acl.members), acl.linkAccess],
     )
+  }
+
+  async remove(name: string): Promise<void> {
+    assertSafeDocumentName(name)
+    const client = await this.pool.connect()
+    try {
+      // One transaction: a half-deleted document whose ACL survived would be
+      // permanently unreachable and permanently unclaimable.
+      await client.query('begin')
+      // Snapshots cascade from documents, but delete them explicitly so the
+      // rows go even when no documents row was ever written.
+      await client.query('delete from document_snapshots where document_name = $1', [name])
+      await client.query('delete from documents where name = $1', [name])
+      await client.query('delete from document_access where document_name = $1', [name])
+      await client.query('commit')
+    } catch (error) {
+      await client.query('rollback')
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   async close(): Promise<void> {

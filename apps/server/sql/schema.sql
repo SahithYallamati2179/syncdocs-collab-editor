@@ -15,8 +15,15 @@ create table if not exists document_snapshots (
   id            bigserial primary key,
   document_name text not null references documents(name) on delete cascade,
   state         bytea not null,
+  -- Display name of whoever edited last before this snapshot was taken. A
+  -- label for the history view, not an authorisation fact.
+  author        text not null default '',
   created_at    timestamptz not null default now()
 );
+
+-- Upgrade path for a database created before author tracking. Safe to re-run.
+alter table document_snapshots
+  add column if not exists author text not null default '';
 
 create index if not exists document_snapshots_by_doc
   on document_snapshots (document_name, created_at desc);

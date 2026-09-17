@@ -18,6 +18,14 @@ const GRACE_MS = 5_000
 const FOOTPRINT_INTERVAL_MS = 2_000
 const RTT_INTERVAL_MS = 4_000
 
+/**
+ * How often to refresh our own activity stamp, and how stale another peer's
+ * stamp may get before they are shown as away. The heartbeat has to be
+ * comfortably shorter than the threshold or a peer flickers between states.
+ */
+const ACTIVITY_HEARTBEAT_MS = 15_000
+export const AWAY_AFTER_MS = 60_000
+
 export interface CollabSession {
   documentId: string
   doc: Y.Doc
@@ -27,6 +35,8 @@ export interface CollabSession {
   reportCharCount(count: number): void
   /** Stamp the local awareness state so peers can measure presence latency. */
   ping(): void
+  /** Record real user interaction, which drives the online/away indicator. */
+  markActive(): void
   /** Close the socket for real — a simulated network partition. */
   disconnect(): void
   reconnect(): void
@@ -231,6 +241,26 @@ function createSession(documentId: string, identity: Identity): CacheEntry {
   doc.on('update', updateHandler)
 
   const awareness = provider.awareness
+
+  /**
+   * Publish "this person is still here" into awareness.
+   *
+   * Presence alone only answers "is a socket open", which is not the same
+   * question as "is anyone actually there" -- a tab left open overnight holds a
+   * perfectly healthy socket. Stamping the last real interaction lets peers
+   * distinguish an active collaborator from an idle one, and awareness is the
+   * right channel for it: it is ephemeral, it is not persisted into the
+   * document, and it disappears on its own when the socket closes.
+   */
+  const markActive = (): void => {
+    awareness?.setLocalStateField('activity', { at: Date.now() })
+  }
+  markActive()
+
+  // A heartbeat, so someone reading rather than typing does not drift into
+  // "away" while they are plainly still watching the page.
+  const activityTimer = setInterval(markActive, ACTIVITY_HEARTBEAT_MS)
+
   const awarenessHandler = () => {
     if (!awareness) return
     metrics.setPeers(Math.max(0, awareness.getStates().size - 1))
@@ -269,7 +299,9 @@ function createSession(documentId: string, identity: Identity): CacheEntry {
     },
     ping() {
       awareness?.setLocalStateField('ping', { t: Date.now() })
+      markActive()
     },
+    markActive,
     disconnect() {
       metrics.recordEvent('partition', 'Partition simulated: socket closed')
       socket.disconnect()
@@ -296,6 +328,7 @@ function createSession(documentId: string, identity: Identity): CacheEntry {
   const teardown = () => {
     clearInterval(footprintTimer)
     clearInterval(rttTimer)
+    clearInterval(activityTimer)
     awareness?.off('change', awarenessHandler)
     doc.off('update', updateHandler)
     provider.destroy()

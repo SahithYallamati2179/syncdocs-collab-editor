@@ -407,6 +407,32 @@ export async function readImportedFile(file: File): Promise<ImportedDocument> {
 export type ImportMode = 'append' | 'replace'
 
 /**
+ * True when the document has no content worth preserving.
+ *
+ * ProseMirror always holds at least one node, so "empty" is not a zero size: a
+ * fresh document is a single empty paragraph. Anything with actual text, or
+ * more than one node, counts as having content.
+ */
+export function isDocumentEmpty(editor: Editor): boolean {
+  const { doc } = editor.state
+  if (doc.childCount > 1) return false
+  return doc.textContent.trim().length === 0
+}
+
+/**
+ * Decide where an uploaded file goes, rather than asking.
+ *
+ * An empty document is being filled, so the file becomes the document. A
+ * document that already has content is being added to — silently discarding
+ * someone's work because they dragged a file in is not a thing to do on a
+ * guess. Both outcomes are one Ctrl+Z away, which is what makes deciding
+ * automatically safe rather than presumptuous.
+ */
+export function chooseImportMode(editor: Editor): ImportMode {
+  return isDocumentEmpty(editor) ? 'replace' : 'append'
+}
+
+/**
  * Put imported content into the live document.
  *
  * Both modes are ordinary editor commands rather than direct Y.Doc surgery, so

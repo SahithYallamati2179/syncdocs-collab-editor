@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { unresolvedCount, useComments } from '@/lib/comments'
 import {
+  deleteDocument,
   fetchDocumentAccess,
   newDocumentId,
   readRecents,
@@ -21,6 +22,7 @@ import { signInWithGoogle, useAuth } from '@/lib/auth'
 import { AuthGate } from './AuthGate'
 import { Icon } from '@/lib/icons'
 import { CommandPalette, type Command } from './CommandPalette'
+import { ConfirmDialog } from './ConfirmDialog'
 import { ExportDialog } from './ExportDialog'
 import { ImportDialog } from './ImportDialog'
 import { RightPanel } from './RightPanel'
@@ -30,7 +32,7 @@ import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { VersionHistoryDialog } from './VersionHistoryDialog'
 
-type DialogName = 'share' | 'settings' | 'versions' | 'export' | 'import' | null
+type DialogName = 'share' | 'settings' | 'versions' | 'export' | 'import' | 'delete' | null
 
 export interface ShellRenderArgs {
   session: ReturnType<typeof useCollabSession>
@@ -46,6 +48,8 @@ export interface ShellRenderArgs {
    * decision, never the thing that enforces it.
    */
   readOnly: boolean
+  /** Open the collaboration panel on the Comments tab. */
+  openComments: () => void
 }
 
 interface AppShellProps {
@@ -106,6 +110,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   const [refreshToken, setRefreshToken] = useState(0)
   const [access, setAccess] = useState<DocumentAccess | null>(null)
   const [accessMessage, setAccessMessage] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
 
   const { documents, error } = useServerDocuments(refreshToken)
   const stats = useServerStats()
@@ -155,6 +160,8 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   useEffect(() => {
     if (stats) setRefreshToken(stats.writes)
   }, [stats])
+
+  const openComments = useCallback(() => setPanelOpen(true), [])
 
   const createDocument = useCallback(() => {
     // A guest cannot claim a document, so sending them to a fresh id would
@@ -216,6 +223,17 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
         label: 'Upload a document',
         hint: '.docx, .md, .html, .txt',
         run: () => setDialog('import'),
+      },
+      {
+        id: 'delete',
+        group: 'Document',
+        icon: 'trash',
+        label: 'Delete this document',
+        hint: 'permanent',
+        run: () => {
+          setDeleteTarget({ id: documentId, title })
+          setDialog('delete')
+        },
       },
       {
         id: 'rename',
@@ -310,6 +328,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
     session,
     snapshot.lagMs,
     snapshot.status,
+    title,
   ])
 
   // The server has already decided this; the flag only tells the UI to stop
@@ -353,6 +372,10 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           onOpenSettings={() => setDialog('settings')}
           onOpenImport={() => setDialog('import')}
           onOpenExport={() => setDialog('export')}
+          onDelete={(id, name) => {
+            setDeleteTarget({ id, title: name })
+            setDialog('delete')
+          }}
         />
 
         <main className="app__main">
@@ -397,6 +420,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
               editor,
               toast,
               readOnly,
+              openComments,
             })
           )}
         </main>
@@ -406,6 +430,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           identity={active}
           threads={threads}
           snapshot={snapshot}
+          editor={editor}
           onClose={() => setPanelOpen(false)}
         />
       </div>
@@ -433,6 +458,34 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           title={title}
           onClose={() => setDialog(null)}
           onToast={toast}
+        />
+      )}
+
+      {dialog === 'delete' && deleteTarget && (
+        <ConfirmDialog
+          title="Delete this document?"
+          confirmLabel="Delete permanently"
+          requirePhrase={deleteTarget.id}
+          body={
+            <>
+              <strong>{deleteTarget.title || 'This untitled document'}</strong> and its entire
+              version history will be removed from the server for everyone it is shared with.
+              This cannot be undone.
+            </>
+          }
+          onConfirm={async () => {
+            await deleteDocument(deleteTarget.id)
+            toast('Document deleted')
+            setRefreshToken((value) => value + 1)
+            // Leaving the page open on a document that no longer exists would
+            // immediately re-create it: the editor's socket would reconnect and
+            // claim the freed name all over again.
+            if (deleteTarget.id === documentId) router.push(`/doc/${newDocumentId()}`)
+          }}
+          onClose={() => {
+            setDialog(null)
+            setDeleteTarget(null)
+          }}
         />
       )}
 

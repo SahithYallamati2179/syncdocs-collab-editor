@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useAuth } from './auth'
-import { acquireSession, releaseSession, type CollabSession } from './collab'
+import { acquireSession, AWAY_AFTER_MS, releaseSession, type CollabSession } from './collab'
 import { getIdentity, type Identity } from './identity'
 import { metrics, type MetricsSnapshot } from './metrics'
 import { authEnabled } from './supabase'
@@ -76,11 +76,25 @@ export function useMetrics(): MetricsSnapshot {
   return useSyncExternalStore(metrics.subscribe, metrics.getSnapshot, metrics.getServerSnapshot)
 }
 
+/**
+ * `online`  - connected, and interacted recently.
+ * `away`    - connected, but idle past AWAY_AFTER_MS.
+ * `offline` - not connected at all. Only ever reported for people we know
+ *             about from the access list, since someone who is not connected
+ *             leaves no trace in awareness to report on.
+ */
+export type PresenceStatus = 'online' | 'away' | 'offline'
+
 export interface PresencePeer {
   clientId: number
   name: string
   color: string
   isSelf: boolean
+  status: PresenceStatus
+  /** Present for a connected peer; used to render "active 3m ago". */
+  lastActiveAt: number | null
+  /** Set for an invited member who is not currently connected. */
+  email?: string
 }
 
 export function usePresence(session: CollabSession | null): PresencePeer[] {
@@ -91,15 +105,30 @@ export function usePresence(session: CollabSession | null): PresencePeer[] {
     if (!awareness) return
 
     const read = () => {
+      const now = Date.now()
       const next: PresencePeer[] = []
       awareness.getStates().forEach((rawState, clientId) => {
-        const user = (rawState as { user?: { name?: string; color?: string } }).user
+        const state = rawState as {
+          user?: { name?: string; color?: string }
+          activity?: { at?: number }
+        }
+        const user = state.user
         if (!user?.name) return
+
+        const lastActiveAt = typeof state.activity?.at === 'number' ? state.activity.at : null
+        // A peer whose build predates the activity stamp has no `activity`
+        // field at all. Treating that as online is the right default: they are
+        // demonstrably connected, and showing them as permanently away would
+        // be worse than not knowing.
+        const idle = lastActiveAt !== null && now - lastActiveAt > AWAY_AFTER_MS
+
         next.push({
           clientId,
           name: user.name,
           color: user.color ?? '#898781',
           isSelf: clientId === awareness.clientID,
+          status: idle ? 'away' : 'online',
+          lastActiveAt,
         })
       })
       next.sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || a.name.localeCompare(b.name))
@@ -108,8 +137,52 @@ export function usePresence(session: CollabSession | null): PresencePeer[] {
 
     read()
     awareness.on('change', read)
-    return () => awareness.off('change', read)
+
+    // Awareness only fires on change, and going idle is the absence of one, so
+    // the transition to "away" needs its own tick or nobody ever looks idle.
+    const timer = setInterval(read, 10_000)
+
+    return () => {
+      awareness.off('change', read)
+      clearInterval(timer)
+    }
   }, [session])
 
   return peers
+}
+
+/**
+ * The people who have access but are not connected right now.
+ *
+ * Kept separate from `usePresence` because it answers a different question
+ * from a different source: awareness knows who is here, and the ACL knows who
+ * could be. Merging them is the caller's job, and only the Share dialog and
+ * the presence popover actually want both.
+ */
+export function offlineMembers(
+  connected: PresencePeer[],
+  members: { email: string }[],
+  ownerEmail: string,
+  selfEmail: string,
+): PresencePeer[] {
+  const here = new Set(connected.map((peer) => peer.name.toLowerCase()))
+  const everyone = [ownerEmail, ...members.map((member) => member.email)].filter(Boolean)
+
+  return everyone
+    .filter((email) => {
+      const normalised = email.toLowerCase()
+      if (normalised === selfEmail.toLowerCase()) return false
+      // Names in awareness are display names, so this match is best-effort:
+      // it suppresses the obvious duplicate without claiming to be exact.
+      return !here.has(normalised) && !here.has(normalised.split('@')[0])
+    })
+    .map((email, index) => ({
+      clientId: -1 - index,
+      name: email,
+      color: 'var(--ink-3)',
+      isSelf: false,
+      status: 'offline' as const,
+      lastActiveAt: null,
+      email,
+    }))
 }

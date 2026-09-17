@@ -23,6 +23,8 @@ export interface SnapshotMeta {
   id: string
   createdAt: string
   bytes: number
+  /** Empty for snapshots written before author tracking existed. */
+  author: string
 }
 
 export interface AclMember {
@@ -255,6 +257,19 @@ export async function removeDocumentMember(
   })
   if (!response.ok) throw new Error(await readError(response, 'Could not remove that person.'))
   return readJson<DocumentAccess>(response, 'Could not remove that person.')
+}
+
+/**
+ * Permanently delete a document. Owner only; the server enforces that.
+ *
+ * There is no soft-delete or trash here, which is why the caller is expected
+ * to confirm first — the server has no undo to offer.
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  const response = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) throw new Error(await readError(response, 'Could not delete that document.'))
 }
 
 /**

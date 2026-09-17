@@ -13,7 +13,10 @@ import type { Editor } from '@tiptap/react'
  * down.
  */
 
-export type ExportFormat = 'markdown' | 'html' | 'text' | 'json'
+export type ExportFormat = 'docx' | 'pdf' | 'png' | 'jpg' | 'markdown' | 'html' | 'text' | 'json'
+
+/** Formats produced as binary, which cannot be previewed as text. */
+export const BINARY_FORMATS: ExportFormat[] = ['docx', 'pdf', 'png', 'jpg']
 
 export const EXPORT_FORMATS: {
   id: ExportFormat
@@ -22,6 +25,34 @@ export const EXPORT_FORMATS: {
   mime: string
   hint: string
 }[] = [
+  {
+    id: 'docx',
+    label: 'Word',
+    extension: 'docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    hint: 'A real .docx — headings, lists, tables and working links.',
+  },
+  {
+    id: 'pdf',
+    label: 'PDF',
+    extension: 'pdf',
+    mime: 'application/pdf',
+    hint: 'Opens your print dialog. Choose "Save as PDF" as the destination.',
+  },
+  {
+    id: 'png',
+    label: 'PNG image',
+    extension: 'png',
+    mime: 'image/png',
+    hint: 'The page rendered as a picture, at twice the screen resolution.',
+  },
+  {
+    id: 'jpg',
+    label: 'JPG image',
+    extension: 'jpg',
+    mime: 'image/jpeg',
+    hint: 'Same as PNG, smaller file, no transparency.',
+  },
   {
     id: 'markdown',
     label: 'Markdown',
@@ -322,6 +353,99 @@ export function fileNameFor(title: string, documentId: string, extension: string
   return `${base}.${extension}`
 }
 
+/**
+ * Rasterise the document to a PNG or JPEG.
+ *
+ * Done by wrapping the exported HTML in an SVG <foreignObject> and drawing
+ * that through a canvas, which keeps the whole thing dependency-free — a
+ * screenshot library would be several hundred kilobytes for one button.
+ *
+ * The trade-off is real and worth stating: an SVG loaded as a data URL cannot
+ * fetch external resources, so remote images and web fonts do not appear. Text,
+ * layout, colour, tables and lists all render correctly, and the editor stores
+ * images by URL rather than by value, so there is nothing local to inline. For
+ * a faithful copy including pictures, PDF via the print dialog is the honest
+ * answer, and the dialog says so.
+ */
+export async function toImageBlob(
+  editor: Editor,
+  title: string,
+  format: 'png' | 'jpg',
+): Promise<Blob> {
+  const width = 820
+  // 2x so the result is legible on a high-density display rather than soft.
+  const scale = 2
+
+  const html = toStandaloneHtml(editor, title)
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  const styles = Array.from(parsed.querySelectorAll('style'))
+    .map((node) => node.textContent ?? '')
+    .join('\n')
+  const body = parsed.body?.innerHTML ?? ''
+
+  // Measure by laying the content out off-screen first: the SVG needs an
+  // explicit height, and guessing it either clips the document or leaves a
+  // huge empty margin below it.
+  const probe = document.createElement('div')
+  probe.setAttribute('style', `position:fixed;left:-10000px;top:0;width:${width}px;`)
+  probe.innerHTML = `<style>${styles}</style>${body}`
+  document.body.appendChild(probe)
+  const height = Math.max(200, Math.ceil(probe.getBoundingClientRect().height) + 48)
+  probe.remove()
+
+  // Serialised through XMLSerializer so the markup is valid XHTML; foreignObject
+  // silently renders nothing for HTML that is merely well-formed-ish.
+  const holder = document.createElement('div')
+  holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+  holder.innerHTML = `<style>${styles}</style>${body}`
+  const xhtml = new XMLSerializer().serializeToString(holder)
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+    `<foreignObject width="100%" height="100%">${xhtml}</foreignObject></svg>`
+
+  const image = new Image()
+  image.width = width
+  image.height = height
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () =>
+      reject(new Error('Could not render the document to an image in this browser.'))
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  })
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width * scale
+  canvas.height = height * scale
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas is unavailable in this browser.')
+
+  // JPEG has no alpha, so without this the transparent areas come out black.
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.scale(scale, scale)
+  context.drawImage(image, 0, 0)
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the image.'))),
+      format === 'png' ? 'image/png' : 'image/jpeg',
+      format === 'png' ? undefined : 0.92,
+    )
+  })
+}
+
+export function downloadBlob(fileName: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export function downloadText(fileName: string, mime: string, content: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: mime }))
   const anchor = document.createElement('a')
@@ -335,14 +459,35 @@ export function downloadText(fileName: string, mime: string, content: string): v
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function exportDocument(
+export async function exportDocument(
   editor: Editor,
   title: string,
   documentId: string,
   format: ExportFormat,
-): string {
+): Promise<string> {
   const spec = EXPORT_FORMATS.find((entry) => entry.id === format) ?? EXPORT_FORMATS[0]
   const fileName = fileNameFor(title, documentId, spec.extension)
+
+  if (format === 'pdf') {
+    // There is no PDF writer here on purpose. The browser already has an
+    // excellent one behind the print dialog, and it handles pagination, fonts
+    // and remote images correctly -- all things a bundled library would do
+    // worse, for hundreds of kilobytes.
+    printDocument(editor, title)
+    return 'the print dialog'
+  }
+
+  if (format === 'docx') {
+    const { toDocxBlob } = await import('./export-docx')
+    downloadBlob(fileName, await toDocxBlob(editor, title))
+    return fileName
+  }
+
+  if (format === 'png' || format === 'jpg') {
+    downloadBlob(fileName, await toImageBlob(editor, title, format))
+    return fileName
+  }
+
   downloadText(fileName, spec.mime, serialize(editor, title, format))
   return fileName
 }

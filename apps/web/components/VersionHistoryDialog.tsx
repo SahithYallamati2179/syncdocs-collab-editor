@@ -17,6 +17,10 @@ interface VersionHistoryDialogProps {
 /**
  * Version history reads the snapshot rows the sync server writes on an interval.
  *
+ * Each row carries the display name of whoever edited last before it was
+ * taken. That is an honest label rather than a full audit trail: a version can
+ * contain work from several people, and it names the most recent of them.
+ *
  * "Restore" does not rewind history — you cannot un-happen operations in a CRDT
  * and still converge. It applies a *compensating edit*: the current content is
  * replaced with the snapshot's content as a new set of operations, which every
@@ -94,7 +98,15 @@ export function VersionHistoryDialog({
             <div className="version-row__when">
               {new Date(snapshot.createdAt).toLocaleString()}
             </div>
-            <div className="version-row__meta">{formatBytes(snapshot.bytes)} encoded</div>
+            <div className="version-row__meta">
+              {snapshot.author ? (
+                <>
+                  <span className="version-row__author">{snapshot.author}</span>
+                  {' · '}
+                </>
+              ) : null}
+              {formatBytes(snapshot.bytes)} encoded
+            </div>
           </div>
           <button
             type="button"
@@ -121,6 +133,9 @@ export function VersionHistoryDialog({
             Preview · {new Date(
               snapshots?.find((snapshot) => snapshot.id === preview.id)?.createdAt ?? Date.now(),
             ).toLocaleString()}
+            {snapshots?.find((snapshot) => snapshot.id === preview.id)?.author
+              ? ` · last edited by ${snapshots.find((snapshot) => snapshot.id === preview.id)?.author}`
+              : ''}
           </div>
           <div className="notice" style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflowY: 'auto' }}>
             {preview.text}

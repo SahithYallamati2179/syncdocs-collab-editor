@@ -28,8 +28,15 @@ export interface DocStore {
    * documents without decoding every stored Y.Doc.
    */
   store(name: string, state: Uint8Array, title: string): Promise<void>
-  /** Append an immutable point-in-time copy (version history). */
-  snapshot(name: string, state: Uint8Array): Promise<void>
+  /**
+   * Append an immutable point-in-time copy (version history).
+   *
+   * `author` is the display name of whoever last edited before this snapshot
+   * was taken, denormalised out of the document's own meta map. It is a label
+   * for the history view, not an authorisation fact -- the person who typed
+   * last is not necessarily the only contributor to the version.
+   */
+  snapshot(name: string, state: Uint8Array, author: string): Promise<void>
   /** Documents that exist in storage, newest first. */
   list(): Promise<DocumentMeta[]>
   /** Version history for one document, newest first. */
@@ -39,6 +46,14 @@ export interface DocStore {
   /** The access-control record, or null for a document nobody has claimed. */
   getAcl(name: string): Promise<DocumentAcl | null>
   setAcl(name: string, acl: DocumentAcl): Promise<void>
+  /**
+   * Permanently remove a document, its snapshots and its access record.
+   *
+   * The ACL goes too, deliberately. Leaving it behind would keep the name
+   * claimed forever: a later visitor would be refused by an owner record for a
+   * document that no longer exists, and the owner could never reuse the id.
+   */
+  remove(name: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -112,6 +127,8 @@ export interface SnapshotMeta {
   id: string
   createdAt: string
   bytes: number
+  /** Empty when the snapshot predates author tracking. */
+  author: string
 }
 
 /**
