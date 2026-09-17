@@ -316,6 +316,20 @@ describe('guest access over HTTP', () => {
    * that would turn every expired session into a silent, confusing loss of
    * access rather than an auth error the client can act on.
    */
+  /**
+   * Authorisation before validation. A caller with no standing on a document
+   * should be told to sign in, not handed a list of the values the endpoint
+   * would have accepted.
+   */
+  it('refuses a guest link change before complaining about the payload', async () => {
+    const result = await call('POST', '/api/documents/doc-open/access/link', undefined, {
+      linkAccess: 'nonsense',
+    })
+    expect(result.status).toBe(401)
+    expect(String(result.body.error)).toMatch(/sign in/i)
+    expect(String(result.body.error)).not.toMatch(/unknown link access level/i)
+  })
+
   it('rejects a malformed token instead of downgrading it to a guest', async () => {
     const result = await call('GET', '/api/documents/doc-open/access', 'not.a.jwt')
     expect(result.status).toBe(401)

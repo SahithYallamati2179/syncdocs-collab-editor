@@ -213,10 +213,16 @@ export async function setLinkAccess(
   user: AuthedUser,
   level: unknown,
 ): Promise<DocumentAcl> {
+  // Ownership is checked before the value is validated, not after. Answering
+  // "that is not a valid level" to a caller who may not touch this document at
+  // all is backwards: it hands input feedback to someone who should simply be
+  // told to sign in, and it makes the endpoint's validation reachable by
+  // anyone who can guess a document id.
+  const acl = await requireOwner(store, documentName, user, 'change link sharing')
+
   if (!isLinkAccess(level)) {
     throw new Error('Unknown link access level. Expected restricted, view or edit.')
   }
-  const acl = await requireOwner(store, documentName, user, 'change link sharing')
   if (acl.linkAccess === level) return acl
 
   const next: DocumentAcl = { ...acl, linkAccess: level as LinkAccess }
