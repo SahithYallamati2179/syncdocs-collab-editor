@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { applyDecisions, diffLines, summarise, type DiffRow } from '@/lib/diff'
-import type { DocumentBlock } from '@/lib/import'
+import { applyDecisions, diffLines, diffWords, summarise, type DiffRow } from '@/lib/diff'
+import { highlightWords, type DocumentBlock } from '@/lib/import'
 import { Icon } from '@/lib/icons'
 
 interface ImportReviewProps {
@@ -15,6 +15,9 @@ interface ImportReviewProps {
 
 /** Unchanged lines shown either side of a change, before collapsing the rest. */
 const CONTEXT = 2
+
+/** Shared empty set, so rows with no word diff do not allocate one each render. */
+const EMPTY: ReadonlySet<number> = new Set()
 
 interface Segment {
   kind: 'rows' | 'gap'
@@ -53,6 +56,50 @@ function segment(rows: DiffRow<DocumentBlock>[]): Segment[] {
   return segments
 }
 
+/**
+ * Pair each removed line with the added line that replaced it.
+ *
+ * The diff emits changes as a run of removals followed by a run of additions,
+ * so within a run the nth removal corresponds to the nth addition. Pairing
+ * them is what makes a word-level comparison possible: on their own, a removal
+ * and an addition are two unrelated lines, and there is nothing to compare.
+ *
+ * Returns, per row id, the word positions that differ from its counterpart.
+ * Rows with no counterpart -- a pure insertion or a pure deletion -- get
+ * nothing, because every word in them is new or gone and highlighting all of
+ * them says less than the row's own colour already does.
+ */
+function pairWordDiffs(rows: DiffRow<DocumentBlock>[]): Map<string, Set<number>> {
+  const result = new Map<string, Set<number>>()
+
+  let index = 0
+  while (index < rows.length) {
+    if (rows[index].op === 'equal') {
+      index += 1
+      continue
+    }
+
+    const removals: DiffRow<DocumentBlock>[] = []
+    const additions: DiffRow<DocumentBlock>[] = []
+    while (index < rows.length && rows[index].op !== 'equal') {
+      if (rows[index].op === 'remove') removals.push(rows[index])
+      else additions.push(rows[index])
+      index += 1
+    }
+
+    const pairs = Math.min(removals.length, additions.length)
+    for (let offset = 0; offset < pairs; offset += 1) {
+      const before = removals[offset]
+      const after = additions[offset]
+      const { beforeChanged, afterChanged } = diffWords(before.value.text, after.value.text)
+      result.set(before.id, beforeChanged)
+      result.set(after.id, afterChanged)
+    }
+  }
+
+  return result
+}
+
 export function ImportReview({
   before,
   after,
@@ -73,6 +120,7 @@ export function ImportReview({
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   const stats = useMemo(() => summarise(rows), [rows])
+  const wordDiffs = useMemo(() => pairWordDiffs(rows), [rows])
   const changed = rows.filter((row) => row.op !== 'equal')
   const segments = useMemo(() => segment(rows), [rows])
 
@@ -139,9 +187,12 @@ export function ImportReview({
                   <span
                     className="review__text"
                     // The block's own markup is rendered so the reviewer sees a
-                    // heading as a heading. It has already been through the
-                    // importer's sanitiser by this point.
-                    dangerouslySetInnerHTML={{ __html: row.value.html }}
+                    // heading as a heading, with the words that actually differ
+                    // marked inside it. Both the markup and the highlight have
+                    // been through the importer's sanitiser by this point.
+                    dangerouslySetInnerHTML={{
+                      __html: highlightWords(row.value.html, wordDiffs.get(row.id) ?? EMPTY),
+                    }}
                   />
 
                   {isChange && (

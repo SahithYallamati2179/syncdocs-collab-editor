@@ -2623,3 +2623,34 @@ textarea {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+
+/* Words that actually differ inside a changed line. The row already carries
+   red or green; this marks the part that moved. */
+.review__row[data-op='remove'] .word-diff {
+  background: rgba(220, 38, 38, 0.3);
+  border-radius: 2px;
+  padding: 0 1px;
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+}
+
+.review__row[data-op='add'] .word-diff {
+  background: rgba(22, 163, 74, 0.32);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
+:root[data-theme='dark'] .review__row[data-op='remove'] .word-diff,
+:root[data-theme='dark'] .review__row[data-op='add'] .word-diff {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .review__row[data-op='remove'] .word-diff {
+    background: rgba(248, 113, 113, 0.28);
+  }
+  :root:not([data-theme='light']) .review__row[data-op='add'] .word-diff {
+    background: rgba(52, 211, 153, 0.26);
+  }
+}

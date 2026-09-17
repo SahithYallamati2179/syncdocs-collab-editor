@@ -156,6 +156,47 @@ export function applyDecisions<T>(rows: DiffRow<T>[], accepted: ReadonlySet<stri
   return out
 }
 
+/**
+ * Which words differ between two versions of the same line.
+ *
+ * Returned as index sets rather than as a marked-up string, so the caller can
+ * apply the highlight to the block's real HTML and keep its formatting. A
+ * changed word inside a bold run has to stay bold.
+ */
+export interface WordDiff {
+  beforeChanged: Set<number>
+  afterChanged: Set<number>
+}
+
+/** Words, in order, ignoring how much whitespace separated them. */
+export function toWords(value: string): string[] {
+  return value.split(/\s+/).filter(Boolean)
+}
+
+export function diffWords(before: string, after: string): WordDiff {
+  const beforeWords = toWords(before)
+  const afterWords = toWords(after)
+
+  const rows = diffLines(beforeWords, afterWords, (word) => word)
+
+  const beforeChanged = new Set<number>()
+  const afterChanged = new Set<number>()
+  let shared = 0
+
+  for (const row of rows) {
+    if (row.op === 'equal') shared += 1
+    else if (row.op === 'remove' && row.beforeIndex !== null) beforeChanged.add(row.beforeIndex)
+    else if (row.op === 'add' && row.afterIndex !== null) afterChanged.add(row.afterIndex)
+  }
+
+  // Two lines with nothing in common are a replacement, not an edit. Painting
+  // every single word as "changed" there adds no information the row's own red
+  // or green background does not already carry, and it looks broken.
+  if (shared === 0) return { beforeChanged: new Set(), afterChanged: new Set() }
+
+  return { beforeChanged, afterChanged }
+}
+
 export interface DiffStats {
   added: number
   removed: number

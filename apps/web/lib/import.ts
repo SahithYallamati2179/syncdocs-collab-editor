@@ -431,6 +431,69 @@ export function htmlToBlocks(html: string): DocumentBlock[] {
   return blocks
 }
 
+/**
+ * Wrap the given word positions of a block in a highlight span.
+ *
+ * Works on the block's real markup rather than on its plain text, walking the
+ * text nodes and rebuilding only the ones that contain a changed word. That is
+ * what keeps a changed word inside a bold run bold, and a changed word inside
+ * a link still a link — rendering the plain text instead would have stripped
+ * every bit of formatting out of exactly the lines the reviewer is studying
+ * most closely.
+ *
+ * Word positions line up with `DocumentBlock.text` because both tokenise the
+ * same way: whitespace runs separate words and are otherwise ignored, so the
+ * nth word of the markup is the nth word of the normalised text.
+ */
+export function highlightWords(html: string, changed: ReadonlySet<number>): string {
+  if (changed.size === 0) return html
+
+  const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+  const walker = parsed.createTreeWalker(parsed.body, NodeFilter.SHOW_TEXT)
+
+  // Collected first: replacing a node while the walker is mid-traversal would
+  // cut the walk short.
+  const textNodes: Text[] = []
+  let node = walker.nextNode()
+  while (node) {
+    textNodes.push(node as Text)
+    node = walker.nextNode()
+  }
+
+  let index = 0
+  for (const textNode of textNodes) {
+    const parts = textNode.data.split(/(\s+)/)
+    const fragment = parsed.createDocumentFragment()
+    let touched = false
+
+    for (const part of parts) {
+      if (!part) continue
+      if (/^\s+$/.test(part)) {
+        fragment.appendChild(parsed.createTextNode(part))
+        continue
+      }
+      // Every non-space run advances the counter, whether or not it is
+      // highlighted, or the indexes drift out of step with the word diff.
+      const position = index
+      index += 1
+
+      if (changed.has(position)) {
+        const span = parsed.createElement('span')
+        span.className = 'word-diff'
+        span.textContent = part
+        fragment.appendChild(span)
+        touched = true
+      } else {
+        fragment.appendChild(parsed.createTextNode(part))
+      }
+    }
+
+    if (touched) textNode.replaceWith(fragment)
+  }
+
+  return parsed.body.innerHTML
+}
+
 export function blocksToHtml(blocks: DocumentBlock[]): string {
   return blocks.map((block) => block.html).join('\n')
 }

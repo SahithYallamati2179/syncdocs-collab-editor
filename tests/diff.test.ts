@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { applyDecisions, diffLines, summarise, type DiffRow } from '../apps/web/lib/diff.js'
+import {
+  applyDecisions,
+  diffLines,
+  diffWords,
+  summarise,
+  toWords,
+  type DiffRow,
+} from '../apps/web/lib/diff.js'
 
 /**
  * The diff drives a review screen where each line is accepted or rejected
@@ -137,5 +144,100 @@ describe('line diff', () => {
     expect(Date.now() - started).toBeLessThan(1000)
     expect(summarise(rows)).toEqual({ added: 1, removed: 1, unchanged: 1999 })
     expect(applyDecisions(rows, allIds(rows))).toEqual(after)
+  })
+})
+
+/**
+ * Word-level highlighting inside a changed line. The indexes returned here are
+ * used to wrap words in the block's real markup, so an index being off by one
+ * does not merely look wrong -- it highlights the wrong word.
+ */
+describe('word diff', () => {
+  const before = (a: string, b: string) => [...diffWords(a, b).beforeChanged].sort((x, y) => x - y)
+  const after = (a: string, b: string) => [...diffWords(a, b).afterChanged].sort((x, y) => x - y)
+
+  it('marks nothing when the lines match', () => {
+    expect(diffWords('the cat sat', 'the cat sat')).toEqual({
+      beforeChanged: new Set(),
+      afterChanged: new Set(),
+    })
+  })
+
+  it('marks a single substituted word on both sides', () => {
+    // "the cat sat"  ->  "the dog sat"
+    expect(before('the cat sat', 'the dog sat')).toEqual([1])
+    expect(after('the cat sat', 'the dog sat')).toEqual([1])
+  })
+
+  it('marks an inserted word only on the incoming side', () => {
+    expect(before('the cat sat', 'the big cat sat')).toEqual([])
+    expect(after('the cat sat', 'the big cat sat')).toEqual([1])
+  })
+
+  it('marks a deleted word only on the original side', () => {
+    expect(before('the big cat sat', 'the cat sat')).toEqual([1])
+    expect(after('the big cat sat', 'the cat sat')).toEqual([])
+  })
+
+  it('marks several separated changes', () => {
+    expect(before('a b c d e', 'a x c y e')).toEqual([1, 3])
+    expect(after('a b c d e', 'a x c y e')).toEqual([1, 3])
+  })
+
+  it('marks a change at the very start and at the very end', () => {
+    expect(before('start middle end', 'begin middle finish')).toEqual([0, 2])
+    expect(after('start middle end', 'begin middle finish')).toEqual([0, 2])
+  })
+
+  /**
+   * Two lines sharing no words are a replacement, not an edit. Marking every
+   * word adds nothing over the row's own red or green background.
+   */
+  it('marks nothing when the lines have no words in common', () => {
+    expect(diffWords('alpha beta', 'gamma delta')).toEqual({
+      beforeChanged: new Set(),
+      afterChanged: new Set(),
+    })
+  })
+
+  it('treats any run of whitespace as a single separator', () => {
+    expect(toWords('  the   cat\n\nsat  ')).toEqual(['the', 'cat', 'sat'])
+    // Differing whitespace alone is not a word change.
+    expect(diffWords('the cat sat', '  the   cat   sat ')).toEqual({
+      beforeChanged: new Set(),
+      afterChanged: new Set(),
+    })
+  })
+
+  it('handles an empty line on either side', () => {
+    expect(diffWords('', 'new text')).toEqual({
+      beforeChanged: new Set(),
+      afterChanged: new Set(),
+    })
+    expect(diffWords('old text', '')).toEqual({
+      beforeChanged: new Set(),
+      afterChanged: new Set(),
+    })
+  })
+
+  /**
+   * Every marked index has to be addressable in its own word list, or the
+   * highlighter would try to wrap a word that is not there.
+   */
+  it('only ever returns indexes that exist on the matching side', () => {
+    const pairs: [string, string][] = [
+      ['one two three', 'one two three four'],
+      ['the quick brown fox', 'the slow brown fox jumps'],
+      ['a a a b', 'a b a a'],
+      ['repeat repeat repeat', 'repeat once repeat'],
+    ]
+
+    for (const [a, b] of pairs) {
+      const { beforeChanged, afterChanged } = diffWords(a, b)
+      const aWords = toWords(a)
+      const bWords = toWords(b)
+      for (const index of beforeChanged) expect(aWords[index]).toBeDefined()
+      for (const index of afterChanged) expect(bWords[index]).toBeDefined()
+    }
   })
 })
