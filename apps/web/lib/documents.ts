@@ -189,6 +189,29 @@ async function readError(response: Response, fallback: string): Promise<string> 
   }
 }
 
+/**
+ * Parse a success body, treating "this is not JSON" as its own failure.
+ *
+ * A 200 does not guarantee our server answered. A free-tier host waking up
+ * returns an HTML holding page, a proxy returns an HTML error, and a server
+ * running an older build answers an endpoint it does not know with its
+ * framework's plain-text catch-all. All three are `response.ok`, and all three
+ * make response.json() throw "Unexpected token <" — which tells the person
+ * reading it nothing about what actually went wrong.
+ */
+async function readJson<T>(response: Response, fallback: string): Promise<T> {
+  const text = await response.text()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new Error(
+      `${fallback} The sync server answered ${response.status} with something that was not ` +
+        `JSON, which usually means it is still waking up, or is running an older build that ` +
+        `does not have this feature yet.`,
+    )
+  }
+}
+
 export async function fetchDocuments(signal?: AbortSignal): Promise<ServerDocument[]> {
   const response = await apiFetch('/api/documents', { signal })
   if (!response.ok) throw new Error(await readError(response, `Document list failed (${response.status})`))
@@ -199,7 +222,7 @@ export async function fetchDocuments(signal?: AbortSignal): Promise<ServerDocume
 export async function fetchDocumentAccess(documentId: string): Promise<DocumentAccess> {
   const response = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/access`)
   if (!response.ok) throw new Error(await readError(response, 'Could not read access settings.'))
-  return (await response.json()) as DocumentAccess
+  return readJson<DocumentAccess>(response, 'Could not read access settings.')
 }
 
 export async function addDocumentMember(
@@ -212,7 +235,7 @@ export async function addDocumentMember(
     body: JSON.stringify({ email }),
   })
   if (!response.ok) throw new Error(await readError(response, 'Could not invite that address.'))
-  return (await response.json()) as DocumentAccess
+  return readJson<DocumentAccess>(response, 'Could not invite that address.')
 }
 
 export async function removeDocumentMember(
@@ -225,7 +248,7 @@ export async function removeDocumentMember(
     body: JSON.stringify({ email }),
   })
   if (!response.ok) throw new Error(await readError(response, 'Could not remove that person.'))
-  return (await response.json()) as DocumentAccess
+  return readJson<DocumentAccess>(response, 'Could not remove that person.')
 }
 
 /**
@@ -245,7 +268,7 @@ export async function setLinkAccess(
     },
   )
   if (!response.ok) throw new Error(await readError(response, 'Could not change link sharing.'))
-  return (await response.json()) as DocumentAccess
+  return readJson<DocumentAccess>(response, 'Could not change link sharing.')
 }
 
 export async function fetchStats(signal?: AbortSignal): Promise<ServerStats> {
