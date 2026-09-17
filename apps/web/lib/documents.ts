@@ -222,15 +222,21 @@ export async function fetchSnapshotDoc(documentId: string, snapshotId: string): 
   return doc
 }
 
+/** How long to wait before retrying a failed document listing. */
+const DOCUMENT_RETRY_MS = 8_000
+
 export function useServerDocuments(refreshToken = 0): {
   documents: ServerDocument[] | null
   error: string | null
 } {
   const [documents, setDocuments] = useState<ServerDocument[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
+    let retry: ReturnType<typeof setTimeout> | undefined
+
     fetchDocuments(controller.signal)
       .then((list) => {
         setDocuments(list)
@@ -238,11 +244,21 @@ export function useServerDocuments(refreshToken = 0): {
       })
       .catch((cause: Error) => {
         if (cause.name === 'AbortError') return
-        setError('Sync server unreachable')
         setDocuments([])
+        // Free hosting tiers sleep after a few minutes idle and answer the
+        // first request with a gateway error while they wake. Without a retry
+        // the explorer would sit on a failure message forever, because its
+        // other trigger (the server write counter) is fetched from the same
+        // server and is failing too.
+        setError('Waking the sync server…')
+        retry = setTimeout(() => setAttempt((value) => value + 1), DOCUMENT_RETRY_MS)
       })
-    return () => controller.abort()
-  }, [refreshToken])
+
+    return () => {
+      controller.abort()
+      if (retry) clearTimeout(retry)
+    }
+  }, [refreshToken, attempt])
 
   return { documents, error }
 }
