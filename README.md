@@ -27,6 +27,26 @@ the server, and comments are stored inside the CRDT itself.
 
 ---
 
+## Live demo
+
+| | |
+| --- | --- |
+| **App** | https://syncdocs-collab-editor-web.vercel.app |
+| **Sync server** | https://syncdocs-sync.onrender.com/health |
+
+Open the app, sign in with Google, and **open the same document URL in a second
+browser** to see the live cursors, presence and merge behaviour. To try it without an
+account, the owner sets the Share dialog's access level to *Anyone with the link* —
+link access needs no sign-in at all.
+
+> **The sync server sleeps after ~15 minutes idle.** The first request after a quiet
+> period takes 30–50 seconds to wake it, during which the editor shows *Offline* and
+> queues edits locally. That is the app behaving correctly under a free-tier
+> constraint, and it resolves itself — but load `/health` first if you want the
+> editor to connect immediately.
+
+---
+
 ## Table of contents
 
 - [Quick start](#quick-start)
@@ -86,22 +106,36 @@ Everything below was confirmed by driving the running app, not by inspection:
 
 | Check | Result |
 | --- | --- |
-| Test suite | **30/30 passing** (`npm test`) — convergence, fuzz, access control |
+| Test suite | **119 passing** across 7 files (`npm test`) |
 | TypeScript, both workspaces | clean (`npm run typecheck`) |
 | Production build | clean (`npm run build`) |
 | Two clients editing one document | bidirectional text sync confirmed |
 | Live remote cursors + presence avatars | rendering with correct per-user colour |
+| Remote **selection highlighting** | two clients: a peer's selected range rendered on the other screen in that peer's colour, with their labelled caret |
 | Comments written on client B | appeared on client A, with the unread badge |
 | Simulated partition | 2 offline edits queued, merged on reconnect, **0 lost** |
 | Convergence after a 7.3s partition | measured and logged in the activity feed |
-| Version history restore | reverted the document to an older snapshot |
+| Version history restore | reverted the document, and `Ctrl+Z` undid the restore |
 | Server round-trip ping | 2ms, p95 3ms |
 | CRDT footprint at 10,026 characters | 11.3 KB encoded — **1.15 bytes per character** |
 | Toolbar | every mark, block, list, alignment, table, image and link control exercised |
-| `javascript:` URL in the link dialog | rejected |
-| Sign-in gate with auth enabled | editor fully blocked until signed in |
-| REST endpoints with auth enabled | 401 with no token, and with a forged token |
-| Access-control logic | 11 tests: ownership claim, invite, revoke, non-owner refused, listing filtered |
+| `javascript:` URL, in the link dialog and in an imported file | rejected, text kept |
+| Sign-in gate with auth enabled | non-document routes blocked until signed in |
+| REST endpoints with auth enabled | 401 with no token and with a forged token |
+
+Confirmed against the **deployed** stack rather than only locally:
+
+| Check | Result |
+| --- | --- |
+| Postgres persistence | `/health` reports `driver: "postgres"`, and the database holds real document, ACL and snapshot rows |
+| View-only link | guest connects, and the server **drops their edits** — verified by reading the stored `Y.Doc` back: the owner's text is there, the guest's is not |
+| Edit link, signed out | guest connects with no account and their text persists |
+| Restricted link, signed out | refused at the WebSocket handshake |
+| Guest document list | empty, and the owner's address and invite list are redacted from a link visitor |
+| Generated `.docx` | unzips to six valid OOXML parts with correct styles, numbering and relationships |
+| Generated `.png` | a real 1640×522 image |
+| Word-level diff on import | changed words marked inside their own formatting, and none of the highlight markup reaches the document |
+| Delete a document | removed from the server, and the page moves off it rather than re-creating it |
 
 ---
 
@@ -295,11 +329,27 @@ once. Both sets of characters survive and both screens show identical text. Then
 three-way partitions healed in arbitrary order, deletes racing inserts, and 2000 random
 operations across 5 replicas.
 
-**Live presence**
+**Live presence: cursors *and* selection highlighting**
 
-The avatar stack shows everyone in the document; click it for the full list. Remote
-carets appear inline with a coloured name label. Colours are derived from a hash of the
-stable user id, so your colour does not change when someone else leaves.
+The avatar stack shows everyone in the document, with an online / away / offline dot;
+click it for the full list. Remote carets appear inline with a coloured name label, and
+when someone selects a range, **that range is highlighted on every other screen in that
+person's colour**.
+
+Verified with two real clients rather than assumed. With Alice selecting
+`editing this sentence`, Bob's DOM contains:
+
+```html
+<span class="ProseMirror-yjs-selection"
+      style="background-color: rgba(0, 131, 0, 0.44);">editing this sentence</span>
+```
+
+alongside her caret, labelled `Alice Anderson` in the same green. Selection state travels
+over the Yjs **awareness** channel, not the document — it is ephemeral, never persisted,
+and disappears on its own when a peer disconnects.
+
+Colours are derived from a hash of the stable user id, so your colour does not change
+when someone else leaves.
 
 **Persistence and recovery**
 
@@ -351,7 +401,7 @@ encoded CRDT size plotted against document length.
 npm test
 ```
 
-**66 tests across five files.** The convergence and fuzz suites run entirely in-process
+**119 tests across seven files.** The convergence and fuzz suites run entirely in-process
 on plain `Y.Doc`s — no browser, no WebSocket, no server. The network is simulated by
 choosing when to hand updates between documents, so a partition is exact and
 reproducible rather than a matter of timing.
@@ -384,6 +434,20 @@ claimed yet, because the module was not the broken part. Covers 401 vs 403, the
 make converters like it embarrassing: `**` inside a code span staying literal, nested
 lists not flattening, parenthesised URLs surviving intact, and `javascript:` hrefs
 losing their target while keeping their text.
+
+**`tests/diff.test.ts`** — the import review. The property that matters is not that
+the diff looks plausible but that the decisions reconstruct exactly what was chosen:
+rejecting everything must return the original document, accepting everything the
+incoming one. Both are asserted over 300 seeded random document pairs, along with the
+rule that an arbitrary mixture never loses a line or invents one. The word-level cases
+pin down which side is marked for a substitution, an insertion and a deletion, and that
+every returned index is addressable — an off-by-one there does not look wrong, it
+highlights the wrong word.
+
+**`tests/database-url.test.ts`** — the startup checks on `DATABASE_URL`. Each case is a
+mistake that is easy to make and expensive to diagnose, because none of them fail in a
+way that names the real cause: the `[YOUR-PASSWORD]` placeholder left in, the IPv6-only
+direct host that hangs instead of refusing, a missing password, a wrong protocol.
 
 ---
 
@@ -482,34 +546,46 @@ the light and dark chart surfaces.
 
 ## Known limitations
 
-- **`AUTH_MODE=dev` is not authentication.** It trusts the identity the browser sends, so
-  the project runs with no external service. In that mode a document link is the only
-  credential. Set `AUTH_MODE=supabase` for real access control.
-- **Access is all-or-nothing per document.** An invitee can edit; there are no view-only
-  or comment-only roles. Enforcing view-only on a CRDT means rejecting writes at the
-  server, not just disabling the toolbar, which is a larger change.
+Stated plainly, because a limitation you find yourself is worse than one you were told
+about.
+
+- **`AUTH_MODE=dev` is not authentication.** It trusts the identity the browser sends,
+  so the project runs with no external service. In that mode a document link is the
+  only credential. Set `AUTH_MODE=supabase` for real access control.
+- **A guest's display name is not verified.** Anonymous link visitors pick their own
+  cursor label. It is decoration; the server treats them as having no identity at all,
+  and they can never own a document or change who has access.
 - **Invites are by email, so changing your Google address loses access** until the owner
   re-invites the new one.
-- **The Google sign-in flow itself has not been run end to end here** — that needs a real
-  Supabase project and OAuth client, which are yours to create. What is verified is the
-  gate (editor blocked without a session), the server's rejection of unauthenticated and
-  forged tokens, and the access-control logic under test.
+- **A comment whose anchor text is deleted becomes orphaned.** The thread survives with
+  the quoted text it was written against, but "jump to this text" has nowhere to go and
+  says so. Deleting the sentence a comment is about is a legitimate edit, not an error
+  to prevent.
+- **Version history is snapshot-based, not per-edit.** The server writes at most one
+  snapshot per `SNAPSHOT_INTERVAL_MS` (5 minutes by default), so history is a coarse
+  timeline rather than a full operation log. It also names only the *last* editor before
+  each snapshot, which is an honest label rather than an audit trail.
+- **Snapshots are never pruned automatically.** A retention query is included as a
+  comment in `sql/schema.sql`.
+- **Images are referenced by URL, not uploaded.** There is no blob store. This is why
+  `.docx` export writes images as a labelled placeholder carrying the URL, and why PNG
+  export cannot include them.
+- **PNG/JPG export cannot fetch remote resources.** It renders through an SVG
+  `foreignObject`, which is not allowed to load external images or web fonts. Text,
+  layout, colour, tables and lists are faithful; pictures are not. PDF via the print
+  dialog is the answer when fidelity matters, and the dialog says so.
+- **The import diff is block-level with word-level highlighting inside changed lines.**
+  It pairs the nth removal with the nth addition in a run, which is right for edits in
+  place and approximate when a file reorders paragraphs wholesale.
 - **Lag injection is egress-only.** It delays what this client sends; the server still
   answers at full speed. A measured round trip therefore moves by roughly the configured
   amount rather than twice it.
-- **Comments are not anchored to a text range.** They are document-level threads, not
-  margin notes pinned to a selection. Anchoring needs Yjs relative positions, which is a
-  known next step rather than a hard problem.
-- **Images are referenced by URL, not uploaded.** There is no blob store.
-- **AI Copilot from the reference design is deliberately absent** rather than present and
-  dead — it needs a language model behind it, which is a separate piece of work.
 - **Single sync-server process.** Correct for one instance; horizontal scale needs the
   Durable Objects path described above.
-- **Snapshots are never pruned automatically.** A retention query is included as a comment
-  in `sql/schema.sql`.
-- **Not deployed.** Local development only, by design at this stage.
-
-
+- **Free-tier hosting sleeps after ~15 minutes idle**, so the first visit after a quiet
+  period waits 30–50 seconds for the sync server to wake.
+- **AI Copilot from the reference design is deliberately absent** rather than present and
+  dead — it needs a language model behind it, which is a separate piece of work.
 
 ---
 
