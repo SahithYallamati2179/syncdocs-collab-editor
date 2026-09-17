@@ -1,0 +1,42 @@
+# Render blueprint for the sync server.
+#
+# The Next.js front end is not described here: it belongs on a serverless or
+# static host. This file covers the piece that genuinely needs a long-lived
+# process, because a WebSocket relay cannot run on a serverless function.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repository.
+
+services:
+  - type: web
+    name: syncdocs-sync
+    runtime: docker
+    dockerfilePath: ./apps/server/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Render injects PORT; config.ts reads it.
+      - key: AUTH_MODE
+        value: dev
+
+      # IMPORTANT for any real deployment.
+      #
+      # The free plan has an ephemeral filesystem: the default `file` driver
+      # loses every document on redeploy and on the idle spin-down. Point this
+      # at Postgres (the Supabase free tier works) and run
+      # apps/server/sql/schema.sql once.
+      - key: STORAGE_DRIVER
+        value: file
+      - key: DATABASE_URL
+        sync: false
+
+      # Lock this to the deployed web origin. The default of "*" is fine for
+      # local development and too loose for a public deployment.
+      - key: CORS_ORIGIN
+        sync: false
+
+      # Only needed when AUTH_MODE=supabase.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false

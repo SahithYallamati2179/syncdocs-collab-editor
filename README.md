@@ -33,6 +33,7 @@ the server, and comments are stored inside the CRDT itself.
 - [Tests](#tests)
 - [Design decisions](#design-decisions)
 - [Known limitations](#known-limitations)
+- [Deployment](#deployment)
 - [Google sign-in and document access](#google-sign-in-and-document-access)
 - [Optional: Postgres persistence](#optional-postgres-persistence)
 
@@ -474,6 +475,87 @@ the light and dark chart surfaces.
   in `sql/schema.sql`.
 - **Not deployed.** Local development only, by design at this stage.
 
+
+
+---
+
+## Deployment
+
+This app is **two deployables, not one**, and that is forced by the architecture:
+
+| Piece | Needs | Goes on |
+| --- | --- | --- |
+| Next.js web app | static + serverless rendering | Vercel |
+| Hocuspocus sync server | a long-lived process holding WebSockets | Render (Docker) |
+
+Serverless functions cannot hold a WebSocket open, so the sync server cannot live on
+Vercel. `apps/server/Dockerfile` and `render.yaml` are in the repo for exactly this.
+
+### Two things that will bite you on a free tier
+
+**Use Postgres, not the file driver.** Free hosts give you an ephemeral filesystem, so
+`STORAGE_DRIVER=file` loses every document on each redeploy and each idle spin-down.
+That looks like a broken persistence feature rather than a hosting limit. Point
+`DATABASE_URL` at Postgres and run `apps/server/sql/schema.sql` once.
+
+**Free services sleep after ~15 minutes idle.** The first visit after a quiet period
+takes 30–50 seconds to wake the sync server, during which the editor shows "Offline"
+and edits queue locally. That is the app behaving correctly, but warn anyone you send
+a cold link to.
+
+### Order of operations
+
+The pieces depend on each other's URLs, so deploy in this order.
+
+**1. Postgres** — create a project (Supabase or Neon), run `apps/server/sql/schema.sql`
+against it, and copy the **pooled** connection string.
+
+**2. Sync server on Render** — New → Blueprint → pick this repository. `render.yaml` is
+detected automatically. Then set, in the service's Environment tab:
+
+```
+STORAGE_DRIVER=postgres
+DATABASE_URL=<your pooled Postgres connection string>
+```
+
+Wait for the deploy, then confirm it is alive:
+
+```bash
+curl https://<your-service>.onrender.com/health
+```
+
+**3. Web app on Vercel** — import the repository and set **Root Directory** to
+`apps/web`. Vercel detects Next.js and the workspace lockfile at the repo root. Add:
+
+```
+NEXT_PUBLIC_COLLAB_WS_URL=wss://<your-service>.onrender.com
+NEXT_PUBLIC_COLLAB_HTTP_URL=https://<your-service>.onrender.com
+```
+
+Note `wss://`, not `ws://` — a browser on an HTTPS page refuses an insecure WebSocket.
+
+**4. Lock CORS back down** — return to Render and set:
+
+```
+CORS_ORIGIN=https://<your-app>.vercel.app
+```
+
+The default `*` is fine locally and too loose in public.
+
+**5. If you enabled Google sign-in**, add the production URLs too: the Vercel origin in
+the Google OAuth client's authorised origins, and
+`https://<your-app>.vercel.app/auth/callback` in Supabase → Authentication → URL
+Configuration → Redirect URLs.
+
+### Building the server image locally
+
+```bash
+docker build -f apps/server/Dockerfile -t syncdocs-server .
+```
+
+```bash
+docker run -p 1234:1234 -e STORAGE_DRIVER=file syncdocs-server
+```
 
 ---
 
