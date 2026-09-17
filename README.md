@@ -13,6 +13,14 @@ It ships with a **telemetry view** that measures the things this kind of system 
 actually judged on: convergence time after a partition, round-trip and presence
 latency, and how the CRDT's memory footprint grows over a long document lifetime.
 
+Documents go **in and out**: upload a Word `.docx`, Markdown, HTML or plain-text file
+straight into a live document, and export or print what you have as Markdown, a
+standalone HTML page, plain text, or the exact ProseMirror tree.
+
+Sharing works two ways. Invite people by Google address, or open the link itself to
+**anyone with it — view-only or editable**. View-only is enforced on the connection,
+not in the toolbar.
+
 **No dead UI.** Every control in the interface is wired to real behaviour — the
 simulation chips close the actual WebSocket, version history reads real snapshots off
 the server, and comments are stored inside the CRDT itself.
@@ -34,8 +42,9 @@ the server, and comments are stored inside the CRDT itself.
 - [Design decisions](#design-decisions)
 - [Known limitations](#known-limitations)
 - [Deployment](#deployment)
+- [Sharing, export and upload](#sharing-export-and-upload)
 - [Google sign-in and document access](#google-sign-in-and-document-access)
-- [Optional: Postgres persistence](#optional-postgres-persistence)
+- [Postgres persistence](#postgres-persistence)
 
 ---
 
@@ -143,8 +152,8 @@ inverted — selectable in Settings.
 
 | Region | Controls, and what each one really does |
 | --- | --- |
-| **Top bar** | Explorer toggle · document title (a live CRDT field — renaming syncs to every peer) · save-state chip (Saved / Saving / Local only) · command palette (`⌘K` / `Ctrl+K`) · connection status · presence stack with a popover of who is here · Share (copy link, and with auth on, invite and revoke by email) · collaboration-panel toggle with unread badge · avatar → Settings |
-| **Explorer** | New Document · the documents actually persisted on the server, with real titles and sizes · documents this browser has open that the server has not stored yet · Version History · Telemetry · Settings · workspace storage meter |
+| **Top bar** | Explorer toggle · document title (a live CRDT field — renaming syncs to every peer) · save-state chip (Saved / Saving / Local only) · command palette (`⌘K` / `Ctrl+K`) · connection status · presence stack with a popover of who is here · Export (download or print) · Share (copy link, choose the access level, invite and revoke by email) · collaboration-panel toggle with unread badge · avatar → Settings |
+| **Explorer** | New Document · Upload a document · the documents actually persisted on the server, with real titles and sizes · documents this browser has open that the server has not stored yet · Upload · Export · Version History · Telemetry · Settings · workspace storage meter |
 | **Toolbar** | undo/redo (collaboration-scoped) · block type · font family · font size · bold, italic, underline, strike, inline code · text colour · highlight · three alignments · bullet and numbered lists · link · table · image · live peer count |
 | **Status strip** | connection state · measured WebSocket round trip · **Simulate: Sync / Lag / Offline**, which force a resync, inject 400 ms of egress delay, and close the socket for real |
 | **Collaboration panel** | Comments tab — add, reply, resolve, reopen, delete, show/hide resolved · Activity tab — the live event log of connects, partitions, syncs and convergence timings |
@@ -164,7 +173,7 @@ collab-editor/
 │   │   ├── src/
 │   │   │   ├── index.ts         Hocuspocus server + lifecycle hooks
 │   │   │   ├── auth.ts          dev identity / Supabase JWT verification (JWKS + HS256)
-│   │   │   ├── access.ts        document ownership, invites, listing filter
+│   │   │   ├── access.ts        ownership, invites, link levels, listing filter
 │   │   │   ├── config.ts        env parsing with working defaults
 │   │   │   ├── metrics.ts       server counters, served at /api/stats
 │   │   │   ├── http-routes.ts   REST endpoints on the WebSocket port
@@ -191,14 +200,19 @@ collab-editor/
 │       │   ├── StatusStrip.tsx       connection line + simulation chips
 │       │   ├── CommandPalette.tsx    ⌘K
 │       │   ├── VersionHistoryDialog.tsx
-│       │   ├── ShareDialog.tsx · SettingsDialog.tsx · PromptDialog.tsx · Modal.tsx
+│       │   ├── ShareDialog.tsx      people, access level, copy link
+│       │   ├── ExportDialog.tsx     format picker, live preview, print
+│       │   ├── ImportDialog.tsx     drag-drop upload, append or replace
+│       │   ├── SettingsDialog.tsx · PromptDialog.tsx · Modal.tsx
 │       │   └── LineChart.tsx         inline SVG chart with crosshair tooltip
 │       └── lib/
 │           ├── auth.ts          Supabase session, Google sign-in, access token
 │           ├── supabase.ts      client + the authEnabled switch
 │           ├── collab.ts        session manager: Y.Doc + providers, refcounted
 │           ├── comments.ts      comment threads stored in the Y.Doc
-│           ├── documents.ts     document list, title field, snapshots
+│           ├── documents.ts     document list, title field, snapshots, access
+│           ├── export.ts       Markdown/HTML/text/JSON serialisers, print
+│           ├── import.ts       .docx/.md/.html/.txt/.json readers, sanitiser
 │           ├── metrics.ts       client instrumentation store
 │           ├── identity.ts · colors.ts · theme.ts · icons.tsx · font-size.ts
 │           └── hooks.ts         React bindings
@@ -206,7 +220,9 @@ collab-editor/
 └── tests/
     ├── convergence.test.ts      hand-written partition + footprint cases
     ├── fuzz.test.ts             seeded randomised convergence property test
-    └── access.test.ts           ownership, invites, revocation, listing filter
+    ├── access.test.ts           ownership, invites, revocation, link levels
+    ├── http-access.test.ts      the REST surface, over real HTTP
+    └── markdown.test.ts         the hand-rolled Markdown converter
 ```
 
 ---
@@ -335,9 +351,10 @@ encoded CRDT size plotted against document length.
 npm test
 ```
 
-The suite runs entirely in-process on plain `Y.Doc`s — no browser, no WebSocket, no
-server. The network is simulated by choosing when to hand updates between documents, so
-a partition is exact and reproducible rather than a matter of timing.
+**66 tests across five files.** The convergence and fuzz suites run entirely in-process
+on plain `Y.Doc`s — no browser, no WebSocket, no server. The network is simulated by
+choosing when to hand updates between documents, so a partition is exact and
+reproducible rather than a matter of timing.
 
 **`tests/convergence.test.ts`** — concurrent inserts at the same position; three replicas
 healed in an awkward order (twice, to prove order-independence); a delete racing an
@@ -350,6 +367,23 @@ across 3–5 replicas with a randomised partition schedule; once every replica h
 every update, they must all hold identical text. The PRNG is seeded so any failure is
 reproducible, and the seed is printed in the assertion message. Includes a run where 50
 edits are made under a *full* partition and every one must survive.
+
+**`tests/access.test.ts`** — ownership claimed on first open, invites and revocation,
+the owner-only checks, the listing filter, and the link levels: view mapping to a
+`viewer` role, an invited editor keeping edit rights while the link is view-only,
+unknown levels rejected rather than stored, and an ACL written before link sharing
+existed reading back as `restricted` instead of undefined.
+
+**`tests/http-access.test.ts`** — the REST endpoints driven over real HTTP with signed
+tokens, which is where the Share dialog bug actually lived: calling the access module
+directly could never have caught `GET /access` returning 403 on a document nobody had
+claimed yet, because the module was not the broken part. Covers 401 vs 403, the
+400/403 split on bad input, CORS preflight, and the full link-level round trip.
+
+**`tests/markdown.test.ts`** — the hand-written converter, aimed at the cases that
+make converters like it embarrassing: `**` inside a code span staying literal, nested
+lists not flattening, parenthesised URLs surviving intact, and `javascript:` hrefs
+losing their target while keeping their text.
 
 ---
 
@@ -511,8 +545,23 @@ a cold link to.
 
 The pieces depend on each other's URLs, so deploy in this order.
 
-**1. Postgres** — create a project (Supabase or Neon), run `apps/server/sql/schema.sql`
-against it, and copy the **pooled** connection string.
+**1. Postgres** — create a project (Supabase or Neon) and run
+`apps/server/sql/schema.sql` against it. In Supabase that is SQL Editor → paste → Run.
+
+Then copy the **pooled** connection string from the dashboard's *Connect* button. Take
+the **Session pooler** one (host `…pooler.supabase.com`, port `5432`), not the direct
+connection. Two reasons, and both bite:
+
+- The direct host (`db.<ref>.supabase.co`) resolves to **IPv6 only** on the free tier,
+  and free Render instances have no IPv6 route to it. The connection does not fail
+  fast — it hangs and then times out, which looks like a slow database rather than an
+  unreachable one.
+- Session mode suits a long-lived server holding a connection pool. Transaction mode
+  (port `6543`) also works here and is the right pick for serverless, but there is no
+  reason to take its prepared-statement caveats for a process that never exits.
+
+The string contains your database password, so treat it like one: paste it straight
+into the host's environment settings and nowhere else.
 
 **2. Sync server on Render** — New → Blueprint → pick this repository. `render.yaml` is
 detected automatically. Then set, in the service's Environment tab:
@@ -560,6 +609,79 @@ docker build -f apps/server/Dockerfile -t syncdocs-server .
 ```bash
 docker run -p 1234:1234 -e STORAGE_DRIVER=file syncdocs-server
 ```
+
+---
+
+## Sharing, export and upload
+
+### Access levels
+
+The Share dialog offers three, and the choice is the owner's alone:
+
+| Level | What the bare URL is worth |
+| --- | --- |
+| **Only invited people** (default) | Nothing. The opener must be the owner or an invited member. |
+| **Anyone with the link can view** | Read-only for any signed-in account holding the link. |
+| **Anyone with the link can edit** | Full editing for any signed-in account holding the link. |
+
+Three things about this are deliberate:
+
+**Membership beats the link level.** Someone you invited stays an editor even while the
+link is view-only. The link raises the floor for strangers; it does not lower the
+ceiling for your colleagues.
+
+**View-only is enforced on the connection, not in the UI.** `onAuthenticate` sets
+`connection.readOnly` for a viewer, so Hocuspocus drops their updates at the server.
+Hiding the toolbar is the courtesy; that flag is the control. Someone who re-enables
+the editor from the console gets a document that refuses to change for anybody.
+
+**Link sharing does not add the document to a visitor's explorer.** You reach a
+link-shared document by following its link; it joins your workspace only once the owner
+invites you. Otherwise "shared with one colleague" silently becomes a workspace-wide
+broadcast to every account on the deployment.
+
+Note that even the open levels still require a sign-in. That is a limit, not an
+oversight: presence, cursor attribution and per-user undo all key off an identity, and
+a truly anonymous editor would have none — so every edit stays attributable.
+
+### Export
+
+Markdown, standalone HTML, plain text, and the ProseMirror JSON tree, plus
+**Print / Save as PDF**. The Markdown serialiser is hand-written against the document
+tree (headings, nested lists, tables, code fences, links, images, marks) rather than
+pulled in as a dependency, and `tests/markdown.test.ts` covers it.
+
+Printing renders into a hidden iframe rather than the live page, so the sidebar,
+toolbar and collaboration panel do not end up in the PDF.
+
+Every format is serialised from the **local replica**. An export therefore works
+offline and mid-partition — "I can still get my words out" should not depend on the
+service that just went down.
+
+### Upload
+
+| Format | How it is read |
+| --- | --- |
+| `.docx` | [mammoth](https://github.com/mwilliamson/mammoth.js), dynamically imported so it stays its own chunk |
+| `.md`, `.markdown` | hand-written converter |
+| `.html`, `.htm` | parsed and sanitised |
+| `.txt` | paragraphs split on blank lines |
+| `.json` | this app's own export, re-imported exactly with no HTML round trip |
+
+Everything funnels through HTML, because that is what TipTap parses using the schema
+the editor is actually configured with — anything the schema does not know is dropped
+on the way in rather than producing an invalid document.
+
+You choose **Add to the end** or **Replace everything**. Both are ordinary editor
+commands, not direct Y.Doc surgery, so an import merges with whatever a collaborator is
+typing at that moment, replicates to every peer, and undoes with `Ctrl+Z`. Replace is a
+delete-then-insert for the same reason: swapping the document out would discard the
+shared history and hand every peer a state they cannot merge.
+
+An uploaded file is untrusted input that is then replicated to every collaborator, so
+scripts, event handlers and unsafe `href`/`src` URLs are stripped before the content
+reaches the editor. A `javascript:` link in a Markdown file keeps its text and loses
+its target.
 
 ---
 
@@ -644,9 +766,26 @@ has never signed in — so invites work before the invitee's first login.
 
 ---
 
-## Optional: Postgres persistence
+## Postgres persistence
+
+Optional locally, **required for any real deployment** — see the free-tier note above.
 
 1. Create a Postgres database (the Supabase free tier works).
 2. Run `apps/server/sql/schema.sql` against it. It creates the document, snapshot and
-   access tables.
+   access tables, and is safe to re-run: every statement is `if not exists`, and the
+   `link_access` column is added by a separate `alter … add column if not exists` so a
+   database created before link sharing upgrades in place.
 3. Set `STORAGE_DRIVER=postgres` and `DATABASE_URL=...` in `apps/server/.env`.
+
+### A note on Supabase and RLS
+
+Supabase publishes every table in the `public` schema through PostgREST, and the
+publishable key ships inside the browser bundle. Left alone, that means anyone who
+views source can read `documents` and `document_access` straight out of the REST API —
+every document body and every ACL, bypassing the sync server entirely.
+
+The schema therefore enables row-level security on all three tables and defines **no
+policies at all**, which denies everything through PostgREST. The sync server is
+unaffected: it connects over a direct Postgres connection as the owning role, and that
+role bypasses RLS. Supabase's linter reports these as `rls_enabled_no_policy` at INFO
+level; here that is the intended state, not a gap to close.
