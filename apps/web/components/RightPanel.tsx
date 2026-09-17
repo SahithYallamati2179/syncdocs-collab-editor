@@ -15,6 +15,7 @@ import {
 import { Icon } from '@/lib/icons'
 import type { Identity } from '@/lib/identity'
 import type { MetricsSnapshot } from '@/lib/metrics'
+import { VersionHistoryPanel } from './VersionHistoryPanel'
 
 interface RightPanelProps {
   session: CollabSession | null
@@ -22,8 +23,17 @@ interface RightPanelProps {
   threads: CommentThread[]
   snapshot: MetricsSnapshot
   editor: Editor | null
+  documentId: string
+  /** Bumped when the server reports another write, so history can refresh. */
+  refreshToken: number
+  /** Which tab to show. Controlled, so the shell can jump straight to one. */
+  tab: PanelTab
+  onTabChange: (tab: PanelTab) => void
+  onToast: (message: string) => void
   onClose: () => void
 }
+
+export type PanelTab = 'comments' | 'activity'
 
 function CommentCard({
   thread,
@@ -164,9 +174,13 @@ export function RightPanel({
   threads,
   snapshot,
   editor,
+  documentId,
+  refreshToken,
+  tab,
+  onTabChange,
+  onToast,
   onClose,
 }: RightPanelProps) {
-  const [tab, setTab] = useState<'comments' | 'activity'>('comments')
   const [draft, setDraft] = useState('')
   const [showResolved, setShowResolved] = useState(false)
   const [selection, setSelection] = useState('')
@@ -233,7 +247,7 @@ export function RightPanel({
           role="tab"
           className="tab"
           aria-selected={tab === 'comments'}
-          onClick={() => setTab('comments')}
+          onClick={() => onTabChange('comments')}
         >
           Comments
         </button>
@@ -242,7 +256,7 @@ export function RightPanel({
           role="tab"
           className="tab"
           aria-selected={tab === 'activity'}
-          onClick={() => setTab('activity')}
+          onClick={() => onTabChange('activity')}
         >
           Activity
         </button>
@@ -283,6 +297,18 @@ export function RightPanel({
 
         {tab === 'activity' && (
           <>
+            <VersionHistoryPanel
+              documentId={documentId}
+              editor={editor}
+              onToast={onToast}
+              refreshToken={refreshToken}
+            />
+
+            <div className="panel__section">
+              <Icon name="activity" size={13} />
+              <span>This session</span>
+            </div>
+
             {snapshot.events.length === 0 && <div className="empty">Nothing recorded yet.</div>}
             {snapshot.events
               .slice()

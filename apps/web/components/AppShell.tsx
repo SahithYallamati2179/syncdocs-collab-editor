@@ -25,14 +25,13 @@ import { CommandPalette, type Command } from './CommandPalette'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ExportDialog } from './ExportDialog'
 import { ImportDialog } from './ImportDialog'
-import { RightPanel } from './RightPanel'
+import { RightPanel, type PanelTab } from './RightPanel'
 import { SettingsDialog } from './SettingsDialog'
 import { ShareDialog } from './ShareDialog'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
-import { VersionHistoryDialog } from './VersionHistoryDialog'
 
-type DialogName = 'share' | 'settings' | 'versions' | 'export' | 'import' | 'delete' | null
+type DialogName = 'share' | 'settings' | 'export' | 'import' | 'delete' | null
 
 export interface ShellRenderArgs {
   session: ReturnType<typeof useCollabSession>
@@ -103,6 +102,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   const [editor, setEditor] = useState<TiptapEditor | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [panelOpen, setPanelOpen] = useState(true)
+  const [panelTab, setPanelTab] = useState<PanelTab>('comments')
   const [dialog, setDialog] = useState<DialogName>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -161,7 +161,20 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
     if (stats) setRefreshToken(stats.writes)
   }, [stats])
 
-  const openComments = useCallback(() => setPanelOpen(true), [])
+  const openComments = useCallback(() => {
+    setPanelOpen(true)
+    setPanelTab('comments')
+  }, [])
+
+  /**
+   * Version history is a view inside the collaboration panel now, not a
+   * dialog, so "open version history" means revealing the panel on the right
+   * tab rather than putting a modal over the document.
+   */
+  const openVersions = useCallback(() => {
+    setPanelOpen(true)
+    setPanelTab('activity')
+  }, [])
 
   const createDocument = useCallback(() => {
     // A guest cannot claim a document, so sending them to a fresh id would
@@ -206,7 +219,8 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
         group: 'Document',
         icon: 'history',
         label: 'Version history',
-        run: () => setDialog('versions'),
+        hint: 'in the activity panel',
+        run: openVersions,
       },
       {
         id: 'export',
@@ -322,6 +336,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   }, [
     createDocument,
     documentId,
+    openVersions,
     documents,
     extraCommands,
     router,
@@ -368,7 +383,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           activeId={documentId}
           recents={recents}
           onCreate={createDocument}
-          onOpenVersions={() => setDialog('versions')}
+          onOpenVersions={openVersions}
           onOpenSettings={() => setDialog('settings')}
           onOpenImport={() => setDialog('import')}
           onOpenExport={() => setDialog('export')}
@@ -431,6 +446,11 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           threads={threads}
           snapshot={snapshot}
           editor={editor}
+          documentId={documentId}
+          refreshToken={refreshToken}
+          tab={panelTab}
+          onTabChange={setPanelTab}
+          onToast={toast}
           onClose={() => setPanelOpen(false)}
         />
       </div>
@@ -506,15 +526,6 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           onIdentityChange={setIdentity}
           stats={stats}
           onClose={() => setDialog(null)}
-        />
-      )}
-
-      {dialog === 'versions' && (
-        <VersionHistoryDialog
-          documentId={documentId}
-          editor={editor}
-          onClose={() => setDialog(null)}
-          onToast={toast}
         />
       )}
 

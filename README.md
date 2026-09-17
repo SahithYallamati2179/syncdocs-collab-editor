@@ -153,10 +153,10 @@ inverted — selectable in Settings.
 | Region | Controls, and what each one really does |
 | --- | --- |
 | **Top bar** | Explorer toggle · document title (a live CRDT field — renaming syncs to every peer) · save-state chip (Saved / Saving / Local only) · command palette (`⌘K` / `Ctrl+K`) · connection status · presence stack with a popover of who is here · Export (download or print) · Share (copy link, choose the access level, invite and revoke by email) · collaboration-panel toggle with unread badge · avatar → Settings |
-| **Explorer** | New Document · Upload a document · the documents actually persisted on the server, with real titles and sizes · documents this browser has open that the server has not stored yet · Upload · Export · Version History · Telemetry · Settings · workspace storage meter |
+| **Explorer** | New Document · Upload a document · the documents actually persisted on the server, with real titles and sizes · documents this browser has open that the server has not stored yet · Upload · Export · Version History (reveals the activity panel) · Telemetry · Settings · workspace storage meter |
 | **Toolbar** | undo/redo (collaboration-scoped) · block type · font family · font size · bold, italic, underline, strike, inline code · text colour · highlight · three alignments · bullet and numbered lists · link · table · image · live peer count |
 | **Status strip** | connection state · measured WebSocket round trip · **Simulate: Sync / Lag / Offline**, which force a resync, inject 400 ms of egress delay, and close the socket for real |
-| **Collaboration panel** | Comments tab — add, reply, resolve, reopen, delete, show/hide resolved · Activity tab — the live event log of connects, partitions, syncs and convergence timings |
+| **Collaboration panel** | Comments tab — add (anchored to selected text), reply, resolve, reopen, delete, show/hide resolved · Activity tab — version history (preview and restore any snapshot, with who edited last) above the live event log of connects, partitions, syncs and convergence timings |
 | **Telemetry** | load generators, stat tiles, three charts, server counters |
 
 **Keyboard:** `⌘K` / `Ctrl+K` opens the command palette (arrows to move, Enter to run,
@@ -199,7 +199,7 @@ collab-editor/
 │       │   ├── EditorToolbar.tsx     formatting controls
 │       │   ├── StatusStrip.tsx       connection line + simulation chips
 │       │   ├── CommandPalette.tsx    ⌘K
-│       │   ├── VersionHistoryDialog.tsx
+│       │   ├── VersionHistoryPanel.tsx  versions, inside the activity tab
 │       │   ├── ShareDialog.tsx      people, access level, copy link
 │       │   ├── ExportDialog.tsx     format picker, live preview, print
 │       │   ├── ImportDialog.tsx     drag-drop upload, append or replace
