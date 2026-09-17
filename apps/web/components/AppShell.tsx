@@ -5,18 +5,23 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { unresolvedCount, useComments } from '@/lib/comments'
 import {
+  fetchDocumentAccess,
   newDocumentId,
   readRecents,
   rememberDocument,
   useDocumentTitle,
   useServerDocuments,
   useServerStats,
+  type DocumentAccess,
 } from '@/lib/documents'
 import { useCollabSession, useIdentity, useMetrics, usePresence } from '@/lib/hooks'
 import type { Identity } from '@/lib/identity'
+import { authEnabled } from '@/lib/supabase'
 import { AuthGate } from './AuthGate'
 import { Icon } from '@/lib/icons'
 import { CommandPalette, type Command } from './CommandPalette'
+import { ExportDialog } from './ExportDialog'
+import { ImportDialog } from './ImportDialog'
 import { RightPanel } from './RightPanel'
 import { SettingsDialog } from './SettingsDialog'
 import { ShareDialog } from './ShareDialog'
@@ -24,7 +29,7 @@ import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { VersionHistoryDialog } from './VersionHistoryDialog'
 
-type DialogName = 'share' | 'settings' | 'versions' | null
+type DialogName = 'share' | 'settings' | 'versions' | 'export' | 'import' | null
 
 export interface ShellRenderArgs {
   session: ReturnType<typeof useCollabSession>
@@ -34,6 +39,12 @@ export interface ShellRenderArgs {
   setEditor: (editor: TiptapEditor | null) => void
   editor: TiptapEditor | null
   toast: (message: string) => void
+  /**
+   * True when the server resolved this user to a viewer on a view-only link.
+   * The editor uses it to go read-only; it is a reflection of the server's
+   * decision, never the thing that enforces it.
+   */
+  readOnly: boolean
 }
 
 interface AppShellProps {
@@ -77,6 +88,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [recents, setRecents] = useState<string[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
+  const [access, setAccess] = useState<DocumentAccess | null>(null)
 
   const { documents, error } = useServerDocuments(refreshToken)
   const stats = useServerStats()
@@ -89,6 +101,33 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   useEffect(() => {
     rememberDocument(documentId)
     setRecents(readRecents())
+  }, [documentId])
+
+  /**
+   * Resolve this user's role up front rather than waiting for the Share dialog
+   * to be opened. The editor needs to know whether to go read-only before the
+   * first keystroke, and a viewer who can type for two seconds and then watch
+   * their words vanish is worse than one who never could.
+   *
+   * A failure here is deliberately not surfaced: the WebSocket handshake
+   * reports access problems with a better message, and this call losing a race
+   * with a cold-starting server should not paint an error over a document that
+   * is about to open perfectly well.
+   */
+  useEffect(() => {
+    if (!authEnabled) return
+    let cancelled = false
+    setAccess(null)
+    fetchDocumentAccess(documentId)
+      .then((value) => {
+        if (!cancelled) setAccess(value)
+      })
+      .catch(() => {
+        /* the socket reports this better */
+      })
+    return () => {
+      cancelled = true
+    }
   }, [documentId])
 
   // Refresh the explorer whenever the server reports another persist write, so
@@ -134,6 +173,22 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
         icon: 'history',
         label: 'Version history',
         run: () => setDialog('versions'),
+      },
+      {
+        id: 'export',
+        group: 'Document',
+        icon: 'download',
+        label: 'Export or print a copy',
+        hint: 'Markdown, HTML, text, PDF',
+        run: () => setDialog('export'),
+      },
+      {
+        id: 'import',
+        group: 'Document',
+        icon: 'upload',
+        label: 'Upload a document',
+        hint: '.docx, .md, .html, .txt',
+        run: () => setDialog('import'),
       },
       {
         id: 'rename',
@@ -230,6 +285,10 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
     snapshot.status,
   ])
 
+  // The server has already decided this; the flag only tells the UI to stop
+  // pretending an edit would stick.
+  const readOnly = access?.role === 'viewer'
+
   return (
     <div className="app">
       <TopBar
@@ -246,6 +305,8 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
         onOpenCommands={() => setPaletteOpen(true)}
         onOpenShare={() => setDialog('share')}
         onOpenSettings={() => setDialog('settings')}
+        onOpenExport={() => setDialog('export')}
+        readOnly={readOnly}
       />
 
       <div
@@ -261,6 +322,8 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
           onCreate={createDocument}
           onOpenVersions={() => setDialog('versions')}
           onOpenSettings={() => setDialog('settings')}
+          onOpenImport={() => setDialog('import')}
+          onOpenExport={() => setDialog('export')}
         />
 
         <main className="app__main">
@@ -286,7 +349,16 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
               </div>
             </div>
           ) : (
-            children({ session, identity: active, peers, snapshot, setEditor, editor, toast })
+            children({
+              session,
+              identity: active,
+              peers,
+              snapshot,
+              setEditor,
+              editor,
+              toast,
+              readOnly,
+            })
           )}
         </main>
 
@@ -304,7 +376,36 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
       )}
 
       {dialog === 'share' && (
-        <ShareDialog documentId={documentId} onClose={() => setDialog(null)} onToast={toast} />
+        <ShareDialog
+          documentId={documentId}
+          title={title}
+          access={access}
+          onAccessChange={setAccess}
+          onExport={() => setDialog('export')}
+          onClose={() => setDialog(null)}
+          onToast={toast}
+        />
+      )}
+
+      {dialog === 'export' && (
+        <ExportDialog
+          editor={editor}
+          documentId={documentId}
+          title={title}
+          onClose={() => setDialog(null)}
+          onToast={toast}
+        />
+      )}
+
+      {dialog === 'import' && (
+        <ImportDialog
+          editor={editor}
+          title={title}
+          readOnly={readOnly}
+          onTitleChange={setTitle}
+          onClose={() => setDialog(null)}
+          onToast={toast}
+        />
       )}
 
       {dialog === 'settings' && (

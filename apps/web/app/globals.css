@@ -1835,3 +1835,324 @@ textarea {
   color: var(--ink-3);
   line-height: 1.55;
 }
+
+/* ===========================================================================
+   Sharing, export and upload.
+   =========================================================================== */
+
+.btn--wide {
+  width: 100%;
+  justify-content: center;
+}
+
+.sidebar__upload {
+  margin: 0 12px 4px;
+  justify-content: flex-start;
+  color: var(--ink-2);
+}
+
+/* --- access level ------------------------------------------------------- */
+
+.access-level {
+  position: relative;
+}
+
+.access-level__trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: var(--surface-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.access-level__trigger:hover:not(:disabled) {
+  background: var(--surface-sunken);
+  border-color: var(--line-2);
+}
+
+.access-level__trigger:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.access-level__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.access-level__label {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+}
+
+.access-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.access-menu__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.access-menu__item:hover {
+  background: var(--surface-soft);
+}
+
+.access-menu__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.access-menu__text strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.access-menu__text span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.share-link .copy-row {
+  margin-bottom: 8px;
+}
+
+/* --- export ------------------------------------------------------------- */
+
+.format-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.format-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.format-card:hover {
+  border-color: var(--line-2);
+  background: var(--surface-soft);
+}
+
+.format-card[data-active='true'] {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.format-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.format-card__head .mono {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.format-card__hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.export-preview {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-sunken);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --- upload ------------------------------------------------------------- */
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 20px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  text-align: center;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.dropzone[data-dragging='true'] {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.dropzone strong {
+  font-size: 14px;
+}
+
+.dropzone__icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-full);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.dropzone__hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.choice-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.choice:hover {
+  border-color: var(--line-2);
+  background: var(--surface-soft);
+}
+
+.choice[data-active='true'] {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.choice strong {
+  font-size: 13px;
+}
+
+.choice span {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.check-row input {
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
+}
+
+.notice__list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* --- view-only ---------------------------------------------------------- */
+
+.readonly-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.readonly-bar strong {
+  font-weight: 600;
+}
+
+.readonly-bar span {
+  color: var(--ink-2);
+}
+
+@media (max-width: 720px) {
+  .format-grid,
+  .choice-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

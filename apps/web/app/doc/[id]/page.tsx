@@ -37,7 +37,7 @@ export default function DocumentPage() {
 
   return (
     <AppShell documentId={documentId}>
-      {({ session, identity, peers, snapshot, setEditor, editor, toast }) => (
+      {({ session, identity, peers, snapshot, setEditor, editor, toast, readOnly }) => (
         <DocumentView
           documentId={documentId}
           session={session}
@@ -50,6 +50,7 @@ export default function DocumentPage() {
           dialog={dialog}
           setDialog={setDialog}
           toast={toast}
+          readOnly={readOnly}
         />
       )}
     </AppShell>
@@ -68,6 +69,7 @@ interface DocumentViewProps {
   dialog: EditorDialog
   setDialog: (dialog: EditorDialog) => void
   toast: (message: string) => void
+  readOnly: boolean
 }
 
 function DocumentView({
@@ -82,6 +84,7 @@ function DocumentView({
   dialog,
   setDialog,
   toast,
+  readOnly,
 }: DocumentViewProps) {
   const onReady = useCallback(
     (instance: TiptapEditor | null) => setEditor(instance),
@@ -92,14 +95,25 @@ function DocumentView({
 
   return (
     <div className="editor-col">
-      <div className="toolbar-wrap">
-        <EditorToolbar
-          editor={editor}
-          peers={peerCount}
-          onInsertLink={() => setDialog('link')}
-          onInsertImage={() => setDialog('image')}
-        />
-      </div>
+      {readOnly ? (
+        <div className="readonly-bar">
+          <Icon name="eye" size={15} />
+          <strong>View only.</strong>
+          <span>
+            You opened this through a view-only link. You can read, follow along live, and export
+            a copy — but not edit.
+          </span>
+        </div>
+      ) : (
+        <div className="toolbar-wrap">
+          <EditorToolbar
+            editor={editor}
+            peers={peerCount}
+            onInsertLink={() => setDialog('link')}
+            onInsertImage={() => setDialog('image')}
+          />
+        </div>
+      )}
 
       <StatusStrip session={session} snapshot={snapshot} />
 
@@ -147,7 +161,12 @@ function DocumentView({
           </div>
 
           {session && identity.id ? (
-            <Editor session={session} identity={identity} onReady={onReady} />
+            <Editor
+              session={session}
+              identity={identity}
+              onReady={onReady}
+              readOnly={readOnly}
+            />
           ) : (
             <div className="empty">Opening document…</div>
           )}

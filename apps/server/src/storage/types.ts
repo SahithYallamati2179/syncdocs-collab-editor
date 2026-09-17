@@ -56,6 +56,51 @@ export interface DocumentAcl {
   ownerEmail: string
   members: AclMember[]
   createdAt: string
+  /** How much the bare URL grants on its own. See {@link LinkAccess}. */
+  linkAccess: LinkAccess
+}
+
+/**
+ * What the link alone is worth.
+ *
+ * `restricted` - the URL grants nothing; the opener must be the owner or an
+ *                invited member. This is the default, and the only level at
+ *                which a document name is a secret worth keeping.
+ * `view`       - any signed-in account holding the link may read, not write.
+ * `edit`       - any signed-in account holding the link may edit.
+ *
+ * Note that even the open levels still require a verified sign-in. That is a
+ * deliberate limit rather than an oversight: presence, cursor attribution and
+ * the per-user undo stack all key off an identity, and a truly anonymous
+ * editor would have none. It also keeps one property worth having -- every
+ * edit in this system is attributable to an account.
+ */
+export type LinkAccess = 'restricted' | 'view' | 'edit'
+
+export const LINK_ACCESS_LEVELS: readonly LinkAccess[] = ['restricted', 'view', 'edit']
+
+export function isLinkAccess(value: unknown): value is LinkAccess {
+  return typeof value === 'string' && (LINK_ACCESS_LEVELS as readonly string[]).includes(value)
+}
+
+/**
+ * Fill in fields that records written by an older build do not have.
+ *
+ * Both drivers run stored ACLs through this on the way out, so the rest of the
+ * server can treat `linkAccess` as always present. The default is deliberately
+ * the closed one: a document saved before link sharing existed was shared with
+ * nobody, and must not silently become link-readable on upgrade.
+ */
+export type StoredAcl = Partial<Omit<DocumentAcl, 'linkAccess'>> & { linkAccess?: unknown }
+
+export function withAclDefaults(stored: StoredAcl): DocumentAcl {
+  return {
+    ownerId: stored.ownerId ?? '',
+    ownerEmail: stored.ownerEmail ?? '',
+    members: Array.isArray(stored.members) ? stored.members : [],
+    createdAt: stored.createdAt ?? new Date(0).toISOString(),
+    linkAccess: isLinkAccess(stored.linkAccess) ? stored.linkAccess : 'restricted',
+  }
 }
 
 export interface AclMember {

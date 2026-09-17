@@ -13,6 +13,8 @@ interface SidebarProps {
   onCreate: () => void
   onOpenVersions: () => void
   onOpenSettings: () => void
+  onOpenImport: () => void
+  onOpenExport: () => void
   onNavigate?: () => void
 }
 
@@ -57,6 +59,8 @@ export function Sidebar({
   onCreate,
   onOpenVersions,
   onOpenSettings,
+  onOpenImport,
+  onOpenExport,
   onNavigate,
 }: SidebarProps) {
   const router = useRouter()
@@ -80,6 +84,11 @@ export function Sidebar({
       <button type="button" className="btn btn--soft sidebar__new" onClick={onCreate}>
         <Icon name="plus" size={14} />
         New Document
+      </button>
+
+      <button type="button" className="btn btn--ghost sidebar__upload" onClick={onOpenImport}>
+        <Icon name="upload" size={14} />
+        Upload a document
       </button>
 
       <div className="sidebar__scroll">
@@ -122,6 +131,8 @@ export function Sidebar({
         )}
 
         <div className="nav-group">Workspace</div>
+        <NavItem icon="upload" label="Upload a document" onClick={onOpenImport} />
+        <NavItem icon="download" label="Export a copy" onClick={onOpenExport} />
         <NavItem icon="history" label="Version History" onClick={onOpenVersions} />
         <NavItem
           icon="activity"

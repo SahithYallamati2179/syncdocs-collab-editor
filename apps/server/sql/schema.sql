@@ -32,8 +32,27 @@ create table if not exists document_access (
   owner_id      text not null,
   owner_email   text not null default '',
   members       jsonb not null default '[]'::jsonb,
+  -- What the bare URL grants on its own: 'restricted' (nothing -- owner and
+  -- invited members only), 'view', or 'edit'. Defaulting to 'restricted'
+  -- matters on upgrade: a document that predates link sharing was shared with
+  -- nobody and must not become link-readable just because the column appeared.
+  link_access   text not null default 'restricted'
+                check (link_access in ('restricted', 'view', 'edit')),
   created_at    timestamptz not null default now()
 );
+
+-- Upgrade path for a database created before link sharing. Safe to re-run.
+alter table document_access
+  add column if not exists link_access text not null default 'restricted';
+
+do $$
+begin
+  alter table document_access
+    add constraint document_access_link_access_check
+    check (link_access in ('restricted', 'view', 'edit'));
+exception
+  when duplicate_object then null;
+end $$;
 
 create index if not exists document_access_by_owner
   on document_access (owner_id);

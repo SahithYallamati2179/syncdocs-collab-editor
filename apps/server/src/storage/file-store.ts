@@ -7,6 +7,7 @@ import {
   type DocumentAcl,
   type DocumentMeta,
   type SnapshotMeta,
+  withAclDefaults,
 } from './types.js'
 
 /**
@@ -133,8 +134,11 @@ export class FileStore implements DocStore {
     assertSafeDocumentName(name)
     try {
       const raw = await fs.readFile(path.join(this.root, name + '.acl.json'), 'utf8')
-      const parsed = JSON.parse(raw) as DocumentAcl
-      return parsed.ownerId ? parsed : null
+      const parsed = JSON.parse(raw) as Partial<DocumentAcl>
+      // withAclDefaults, not a straight cast: records written before link
+      // sharing existed have no linkAccess field, and an undefined level would
+      // fall through every branch of roleFor() and lock out the owner.
+      return parsed.ownerId ? withAclDefaults(parsed) : null
     } catch {
       return null
     }

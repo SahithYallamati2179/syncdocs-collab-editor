@@ -27,6 +27,12 @@ interface EditorProps {
   session: CollabSession
   identity: Identity
   onReady?: (editor: TiptapEditor | null) => void
+  /**
+   * Mirrors the role the server resolved. The server has already marked this
+   * connection read-only, so an edit made anyway would be dropped on arrival;
+   * this just stops the client from pretending otherwise.
+   */
+  readOnly?: boolean
 }
 
 /**
@@ -37,7 +43,7 @@ interface EditorProps {
  */
 const PING_INTERVAL_MS = 50
 
-export function Editor({ session, identity, onReady }: EditorProps) {
+export function Editor({ session, identity, onReady, readOnly = false }: EditorProps) {
   const lastPingRef = useRef(0)
 
   const editor = useEditor(
@@ -45,6 +51,8 @@ export function Editor({ session, identity, onReady }: EditorProps) {
       // Next renders this on the server first; TipTap must not build the view
       // until the browser takes over or the markup will not match.
       immediatelyRender: false,
+
+      editable: !readOnly,
 
       extensions: [
         StarterKit.configure({
@@ -108,6 +116,13 @@ export function Editor({ session, identity, onReady }: EditorProps) {
     },
     [session, identity.name, identity.color],
   )
+
+  // The role can arrive after the editor is built -- the access call and the
+  // WebSocket handshake race each other -- so it is applied again here rather
+  // than only at construction.
+  useEffect(() => {
+    editor?.setEditable(!readOnly)
+  }, [editor, readOnly])
 
   useEffect(() => {
     onReady?.(editor)

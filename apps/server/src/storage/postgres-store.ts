@@ -6,6 +6,7 @@ import {
   type DocumentAcl,
   type DocumentMeta,
   type SnapshotMeta,
+  withAclDefaults,
 } from './types.js'
 
 const UPSERT_SQL =
@@ -110,29 +111,35 @@ export class PostgresStore implements DocStore {
       owner_id: string
       owner_email: string
       members: unknown
+      link_access: string | null
       created_at: Date
     }>(
-      'select owner_id, owner_email, members, created_at from document_access where document_name = $1',
+      'select owner_id, owner_email, members, link_access, created_at ' +
+        'from document_access where document_name = $1',
       [name],
     )
     const row = result.rows[0]
     if (!row?.owner_id) return null
-    return {
+    // The column is nullable for rows written before link sharing existed;
+    // withAclDefaults turns that into the closed level rather than undefined.
+    return withAclDefaults({
       ownerId: row.owner_id,
       ownerEmail: row.owner_email ?? '',
       members: Array.isArray(row.members) ? (row.members as DocumentAcl['members']) : [],
+      linkAccess: row.link_access ?? undefined,
       createdAt: row.created_at.toISOString(),
-    }
+    })
   }
 
   async setAcl(name: string, acl: DocumentAcl): Promise<void> {
     assertSafeDocumentName(name)
     await this.pool.query(
-      'insert into document_access (document_name, owner_id, owner_email, members) ' +
-        'values ($1, $2, $3, $4::jsonb) ' +
+      'insert into document_access (document_name, owner_id, owner_email, members, link_access) ' +
+        'values ($1, $2, $3, $4::jsonb, $5) ' +
         'on conflict (document_name) do update set owner_id = excluded.owner_id, ' +
-        'owner_email = excluded.owner_email, members = excluded.members',
-      [name, acl.ownerId, acl.ownerEmail, JSON.stringify(acl.members)],
+        'owner_email = excluded.owner_email, members = excluded.members, ' +
+        'link_access = excluded.link_access',
+      [name, acl.ownerId, acl.ownerEmail, JSON.stringify(acl.members), acl.linkAccess],
     )
   }
 

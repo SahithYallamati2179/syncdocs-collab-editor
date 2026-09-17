@@ -36,15 +36,23 @@ const server = Server.configure({
    * here closes the socket with an auth error, which the provider surfaces to
    * the UI. Whatever is returned becomes `context` on later hooks.
    */
-  async onAuthenticate({ token, documentName }) {
+  async onAuthenticate({ token, documentName, connection }) {
     try {
       const user = await authenticate(token)
-      // Claims ownership on first open, and rejects anyone the owner has not
-      // invited. Throwing here closes the socket with a reason the provider
-      // surfaces to the UI.
-      const acl = await authorize(store, documentName, user)
-      console.log(`[auth] ${user.email || user.name} -> ${documentName}`)
-      return { user, acl }
+      // Claims ownership on first open, and rejects anyone who has neither an
+      // invitation nor a link level that covers them. Throwing here closes the
+      // socket with a reason the provider surfaces to the UI.
+      const { acl, role } = await authorize(store, documentName, user)
+
+      // The enforcement point for view-only link sharing. Hocuspocus drops
+      // incoming updates from a read-only connection, so a viewer who edits
+      // the DOM by hand still cannot land a change on the server or on anyone
+      // else's replica. Hiding the toolbar in the client is the courtesy;
+      // this is the control.
+      connection.readOnly = role === 'viewer'
+
+      console.log(`[auth] ${user.email || user.name} -> ${documentName} (${role})`)
+      return { user, acl, role }
     } catch (error) {
       metrics.authFailed()
       console.warn(`[auth] rejected for ${documentName}: ${(error as Error).message}`)

@@ -52,6 +52,13 @@ const PATHS = {
   gauge: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 12l4-4',
   chevronDown: 'm6 9 6 6 6-6',
   sort: 'm8 7 4-4 4 4M8 17l4 4 4-4',
+  lock: 'M5 11a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zM8 9V6a4 4 0 0 1 8 0v3',
+  globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M3 12h18M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18',
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6',
+  download: 'M12 3v12M7 11l5 5 5-5M4 20h16',
+  upload: 'M12 20V8M7 12l5-5 5 5M4 4h16',
+  print: 'M7 8V3h10v5M7 18H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M7 15h10v6H7z',
+  copy: 'M9 9a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
 } as const
 
 export type IconName = keyof typeof PATHS

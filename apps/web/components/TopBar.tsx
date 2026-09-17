@@ -22,6 +22,8 @@ interface TopBarProps {
   onOpenCommands: () => void
   onOpenShare: () => void
   onOpenSettings: () => void
+  onOpenExport: () => void
+  readOnly: boolean
 }
 
 function SaveChip({ snapshot }: { snapshot: MetricsSnapshot }) {
@@ -51,6 +53,8 @@ export function TopBar({
   onOpenCommands,
   onOpenShare,
   onOpenSettings,
+  onOpenExport,
+  readOnly,
 }: TopBarProps) {
   const [presenceOpen, setPresenceOpen] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
@@ -104,21 +108,31 @@ export function TopBar({
           value={title}
           placeholder="Untitled document"
           aria-label="Document title"
+          readOnly={readOnly}
           onChange={(event) => onTitleChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') event.currentTarget.blur()
           }}
         />
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={() => titleRef.current?.focus()}
-          aria-label="Rename document"
-          title="Rename document"
-        >
-          <Icon name="pencil" size={13} />
-        </button>
-        <SaveChip snapshot={snapshot} />
+        {!readOnly && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => titleRef.current?.focus()}
+            aria-label="Rename document"
+            title="Rename document"
+          >
+            <Icon name="pencil" size={13} />
+          </button>
+        )}
+        {readOnly ? (
+          <span className="save-chip" data-state="offline" title="You have view-only access">
+            <Icon name="eye" size={12} />
+            View only
+          </span>
+        ) : (
+          <SaveChip snapshot={snapshot} />
+        )}
       </span>
 
       <span className="topbar__spacer" />
@@ -176,6 +190,16 @@ export function TopBar({
           </div>
         )}
       </div>
+
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={onOpenExport}
+        aria-label="Export or print a copy"
+        title="Export or print a copy"
+      >
+        <Icon name="download" size={17} />
+      </button>
 
       <button type="button" className="btn btn--primary" onClick={onOpenShare}>
         <Icon name="share" size={14} />

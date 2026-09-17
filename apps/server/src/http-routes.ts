@@ -6,11 +6,13 @@ import {
   filterAccessible,
   isOwner,
   removeMember,
+  type Role,
+  setLinkAccess,
 } from './access.js'
 import { authenticate, authRequired, type AuthedUser } from './auth.js'
 import { config } from './config.js'
 import { metrics } from './metrics.js'
-import type { DocStore } from './storage/index.js'
+import type { DocStore, DocumentAcl } from './storage/index.js'
 
 function send(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, {
@@ -21,6 +23,25 @@ function send(response: ServerResponse, status: number, body: unknown): void {
     'cache-control': 'no-store',
   })
   response.end(JSON.stringify(body))
+}
+
+/**
+ * One shape for every access response, so the client never has to reconcile
+ * three slightly different payloads from the three endpoints that return one.
+ */
+function sendAccess(
+  response: ServerResponse,
+  acl: DocumentAcl | null,
+  role: Role,
+  user: AuthedUser,
+): void {
+  send(response, 200, {
+    acl,
+    role,
+    isOwner: acl ? isOwner(acl, user) : role === 'owner',
+    linkAccess: acl?.linkAccess ?? 'edit',
+    authRequired: authRequired(),
+  })
 }
 
 /**
@@ -170,8 +191,8 @@ export async function handleHttpRequest(
         // first thing that touches a brand-new document, and should claim
         // ownership rather than 403 just because the editor's WebSocket
         // hasn't connected (or finished connecting) yet.
-        const acl = await authorize(store, name, user)
-        send(response, 200, { acl, isOwner: acl ? isOwner(acl, user) : false, authRequired: true })
+        const { acl, role } = await authorize(store, name, user)
+        sendAccess(response, acl, role, user)
         return true
       }
 
@@ -182,11 +203,46 @@ export async function handleHttpRequest(
           method === 'POST'
             ? await addMember(store, name, user, email)
             : await removeMember(store, name, user, email)
-        send(response, 200, { acl, isOwner: isOwner(acl, user), authRequired: true })
+        sendAccess(response, acl, 'owner', user)
         return true
       }
 
       send(response, 405, { error: 'Method not allowed.' })
+    } catch (error) {
+      const status = error instanceof AccessDenied ? 403 : 400
+      send(response, status, { error: (error as Error).message })
+    }
+    return true
+  }
+
+  // /api/documents/:name/access/link
+  const linkMatch = route.match(/^\/api\/documents\/([^/]+)\/access\/link$/)
+  if (linkMatch) {
+    const name = decodeURIComponent(linkMatch[1])
+    const user = await identify(request)
+
+    if (!authRequired()) {
+      // Without sign-in every document is already open to anyone holding the
+      // URL, so there is no level to choose between. Saying so plainly beats a
+      // control that silently does nothing.
+      send(response, 409, {
+        error: 'Link sharing needs AUTH_MODE=supabase. Without it every link is already open.',
+      })
+      return true
+    }
+    if (!user) {
+      send(response, 401, { error: 'Sign in to change link sharing.' })
+      return true
+    }
+    if (method !== 'POST') {
+      send(response, 405, { error: 'Method not allowed.' })
+      return true
+    }
+
+    try {
+      const body = await readJsonBody(request)
+      const acl = await setLinkAccess(store, name, user, body.linkAccess)
+      sendAccess(response, acl, 'owner', user)
     } catch (error) {
       const status = error instanceof AccessDenied ? 403 : 400
       send(response, status, { error: (error as Error).message })

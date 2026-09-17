@@ -35,11 +35,49 @@ export interface DocumentAcl {
   ownerEmail: string
   members: AclMember[]
   createdAt: string
+  linkAccess: LinkAccess
 }
+
+/**
+ * What the bare URL grants on its own. Mirrors the server's type; the labels
+ * live next to it so the dialog and the toast never drift apart.
+ */
+export type LinkAccess = 'restricted' | 'view' | 'edit'
+
+export const LINK_ACCESS_OPTIONS: {
+  id: LinkAccess
+  label: string
+  detail: string
+  icon: 'lock' | 'globe'
+}[] = [
+  {
+    id: 'restricted',
+    label: 'Only invited people',
+    detail: 'The link on its own opens nothing. You choose who gets in.',
+    icon: 'lock',
+  },
+  {
+    id: 'view',
+    label: 'Anyone with the link can view',
+    detail: 'Read-only. Viewers cannot type, and the server rejects it if they try.',
+    icon: 'globe',
+  },
+  {
+    id: 'edit',
+    label: 'Anyone with the link can edit',
+    detail: 'Full editing for anyone holding the link. Sign-in is still required.',
+    icon: 'globe',
+  },
+]
+
+/** What this user may do here. `viewer` is enforced by the server, not the UI. */
+export type Role = 'owner' | 'editor' | 'viewer'
 
 export interface DocumentAccess {
   acl: DocumentAcl | null
+  role: Role
   isOwner: boolean
+  linkAccess: LinkAccess
   authRequired: boolean
 }
 
@@ -187,6 +225,26 @@ export async function removeDocumentMember(
     body: JSON.stringify({ email }),
   })
   if (!response.ok) throw new Error(await readError(response, 'Could not remove that person.'))
+  return (await response.json()) as DocumentAccess
+}
+
+/**
+ * Change what the bare link grants. Owner-only, enforced on the server; the
+ * dialog hides the control for everyone else as a courtesy, not as the check.
+ */
+export async function setLinkAccess(
+  documentId: string,
+  linkAccess: LinkAccess,
+): Promise<DocumentAccess> {
+  const response = await apiFetch(
+    `/api/documents/${encodeURIComponent(documentId)}/access/link`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ linkAccess }),
+    },
+  )
+  if (!response.ok) throw new Error(await readError(response, 'Could not change link sharing.'))
   return (await response.json()) as DocumentAccess
 }
 
