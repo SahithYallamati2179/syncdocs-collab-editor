@@ -493,10 +493,14 @@ Vercel. `apps/server/Dockerfile` and `render.yaml` are in the repo for exactly t
 
 ### Two things that will bite you on a free tier
 
-**Use Postgres, not the file driver.** Free hosts give you an ephemeral filesystem, so
-`STORAGE_DRIVER=file` loses every document on each redeploy and each idle spin-down.
-That looks like a broken persistence feature rather than a hosting limit. Point
-`DATABASE_URL` at Postgres and run `apps/server/sql/schema.sql` once.
+**Use Postgres, not the file driver — and treat that as required, not optional, once
+`AUTH_MODE=supabase` is on.** Free hosts give you an ephemeral filesystem (Render states
+plainly that "Disks are not supported for free compute plans"), so `STORAGE_DRIVER=file`
+loses everything under `DATA_DIR` on each redeploy and each idle spin-down. That means
+not just documents but **the access-control records too** — ownership and every
+invitation you have issued. The visible symptom is that you invite a collaborator, the
+service sleeps, and afterwards the document has no owner and your invite list is empty.
+Point `DATABASE_URL` at Postgres and run `apps/server/sql/schema.sql` once.
 
 **Free services sleep after ~15 minutes idle.** The first visit after a quiet period
 takes 30–50 seconds to wake the sync server, during which the editor shows "Offline"
