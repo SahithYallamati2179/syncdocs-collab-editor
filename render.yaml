@@ -21,12 +21,21 @@ services:
 
       # IMPORTANT for any real deployment.
       #
-      # The free plan has an ephemeral filesystem: the default `file` driver
-      # loses every document on redeploy and on the idle spin-down. Point this
-      # at Postgres (the Supabase free tier works) and run
-      # apps/server/sql/schema.sql once.
+      # The free plan has an ephemeral filesystem, so the default `file` driver
+      # loses every document -- and every ACL, meaning ownership and all your
+      # invitations -- on each redeploy and each idle spin-down. Set both of
+      # these in the dashboard, and run apps/server/sql/schema.sql once:
+      #
+      #   STORAGE_DRIVER=postgres
+      #   DATABASE_URL=<session pooler string, port 5432>
+      #
+      # Both are `sync: false` deliberately. A hardcoded `value: file` here is
+      # blueprint-managed, so re-syncing the blueprint would quietly revert a
+      # dashboard switch to Postgres and start dropping data again. Left unset,
+      # config.ts falls back to the file driver, which is the same safe default
+      # without the footgun.
       - key: STORAGE_DRIVER
-        value: file
+        sync: false
       - key: DATABASE_URL
         sync: false
 
