@@ -27,19 +27,24 @@ const owner = {
   name: 'Owner',
   email: 'Owner@Example.com',
   picture: '',
+  isGuest: false,
 }
 const invited = {
   id: 'user-invited',
   name: 'Invited',
   email: 'invited@example.com',
   picture: '',
+  isGuest: false,
 }
 const stranger = {
   id: 'user-stranger',
   name: 'Stranger',
   email: 'stranger@example.com',
   picture: '',
+  isGuest: false,
 }
+/** Nobody signed in. Carries no id at all, which is the point. */
+const guest = { id: '', name: 'Guest', email: '', picture: '', isGuest: true }
 
 beforeAll(async () => {
   access = await import('../apps/server/src/access.js')
@@ -137,7 +142,13 @@ describe('document access control', () => {
   })
 
   it('does not treat an empty email as a match for a member', async () => {
-    const noEmail = { id: 'user-no-email', name: 'No Email', email: '', picture: '' }
+    const noEmail = {
+      id: 'user-no-email',
+      name: 'No Email',
+      email: '',
+      picture: '',
+      isGuest: false,
+    }
     await access.addMember(store, 'doc-beta', invited, 'someone@example.com')
     await expect(access.authorize(store, 'doc-beta', noEmail)).rejects.toThrow(
       /do not have access/i,
@@ -305,5 +316,111 @@ describe('link sharing', () => {
     await expect(access.authorize(store, 'doc-legacy', stranger)).rejects.toThrow(
       /do not have access/i,
     )
+  })
+})
+
+/**
+ * Anonymous access, which is what "Anyone with the link — no sign in required"
+ * actually means. This is the part where a mistake is a security bug rather
+ * than a sync bug, so it gets the most pointed cases: a guest must never own
+ * anything, never see who else was invited, and never get in anywhere the
+ * owner did not open up.
+ */
+describe('guests (no sign-in)', () => {
+  it('refuses a guest on a restricted document', async () => {
+    await access.authorize(store, 'doc-guest', owner)
+    await expect(access.authorize(store, 'doc-guest', guest)).rejects.toThrow(/private/i)
+  })
+
+  it('lets a guest read a view link and edit an edit link', async () => {
+    await access.setLinkAccess(store, 'doc-guest', owner, 'view')
+    expect((await access.authorize(store, 'doc-guest', guest)).role).toBe('viewer')
+
+    await access.setLinkAccess(store, 'doc-guest', owner, 'edit')
+    expect((await access.authorize(store, 'doc-guest', guest)).role).toBe('editor')
+  })
+
+  /**
+   * The one that matters most. Claim-on-first-open is how documents come into
+   * existence; if a guest could trigger it, anyone could mint and own
+   * documents on the deployment just by guessing names.
+   */
+  it('never lets a guest claim an unclaimed document', async () => {
+    await expect(access.authorize(store, 'doc-unclaimed', guest)).rejects.toThrow(/sign in/i)
+    // And nothing was written, so the real owner can still claim it.
+    expect(await store.getAcl('doc-unclaimed')).toBeNull()
+    expect((await access.authorize(store, 'doc-unclaimed', owner)).role).toBe('owner')
+  })
+
+  /**
+   * A guest's id is the empty string, so an ACL with an empty ownerId is the
+   * one shape where a naive `acl.ownerId === user.id` would hand ownership to
+   * every anonymous visitor at once. Two independent things prevent it, and
+   * both are asserted here because either one alone would be load-bearing:
+   *
+   *  1. Both drivers treat a record with no ownerId as no record at all, so
+   *     it never reaches the comparison.
+   *  2. isOwner() refuses a guest outright, and refuses an empty ownerId
+   *     outright, for the case where such a record is held in memory anyway.
+   */
+  it('never treats a guest as the owner of a record with an empty ownerId', async () => {
+    const corrupt = {
+      ownerId: '',
+      ownerEmail: '',
+      members: [],
+      createdAt: new Date().toISOString(),
+      linkAccess: 'edit' as const,
+    }
+
+    expect(access.isOwner(corrupt, guest)).toBe(false)
+    // Not even a signed-in user with an empty id, which dev mode cannot
+    // produce but a malformed token might.
+    expect(access.isOwner(corrupt, { ...guest, isGuest: false })).toBe(false)
+
+    await store.setAcl('doc-empty-owner', corrupt)
+    // The driver declines to load it, so the document reads as unclaimed...
+    expect(await store.getAcl('doc-empty-owner')).toBeNull()
+    // ...which means a guest is told to sign in, not handed the document.
+    await expect(access.authorize(store, 'doc-empty-owner', guest)).rejects.toThrow(/sign in/i)
+  })
+
+  it('refuses every mutation from a guest, however the link is set', async () => {
+    await access.setLinkAccess(store, 'doc-guest', owner, 'edit')
+    await expect(access.addMember(store, 'doc-guest', guest, 'x@y.com')).rejects.toThrow(
+      /sign in/i,
+    )
+    await expect(access.removeMember(store, 'doc-guest', guest, 'x@y.com')).rejects.toThrow(
+      /sign in/i,
+    )
+    await expect(access.setLinkAccess(store, 'doc-guest', guest, 'restricted')).rejects.toThrow(
+      /sign in/i,
+    )
+    expect((await store.getAcl('doc-guest'))?.linkAccess).toBe('edit')
+  })
+
+  /**
+   * A share link shares the document, not the guest list. Handing back the
+   * owner's address and every collaborator's would turn a view link into a way
+   * to harvest addresses.
+   */
+  it('hides the owner address and member list from a link visitor', async () => {
+    await access.addMember(store, 'doc-guest', owner, 'invited@example.com')
+    const acl = (await store.getAcl('doc-guest'))!
+
+    const forGuest = access.visibleAcl(acl, guest)
+    expect(forGuest?.ownerEmail).toBe('')
+    expect(forGuest?.members).toEqual([])
+
+    // A signed-in stranger on the same link is no better placed.
+    expect(access.visibleAcl(acl, stranger)?.members).toEqual([])
+
+    // The owner and the invited member see the real thing.
+    expect(access.visibleAcl(acl, owner)?.ownerEmail).toBe('owner@example.com')
+    expect(access.visibleAcl(acl, invited)?.members).toHaveLength(1)
+  })
+
+  it('shows a guest no documents at all in the explorer', async () => {
+    const all = [{ name: 'doc-guest' }, { name: 'doc-alpha' }]
+    expect(await access.filterAccessible(store, all, guest)).toEqual([])
   })
 })

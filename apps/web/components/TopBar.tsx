@@ -24,6 +24,9 @@ interface TopBarProps {
   onOpenSettings: () => void
   onOpenExport: () => void
   readOnly: boolean
+  /** Viewing without an account, via a shared link. */
+  isGuest: boolean
+  onSignIn: () => void
 }
 
 function SaveChip({ snapshot }: { snapshot: MetricsSnapshot }) {
@@ -55,6 +58,8 @@ export function TopBar({
   onOpenSettings,
   onOpenExport,
   readOnly,
+  isGuest,
+  onSignIn,
 }: TopBarProps) {
   const [presenceOpen, setPresenceOpen] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
@@ -218,17 +223,23 @@ export function TopBar({
         {unresolvedComments > 0 && <span className="icon-btn__badge" aria-hidden />}
       </button>
 
-      <button
-        type="button"
-        className="presence"
-        onClick={onOpenSettings}
-        aria-label="Your account and settings"
-        title={`${identity.name} — settings`}
-      >
-        <span className="avatar" style={{ background: identity.color }}>
-          {initialsFor(identity.name || '?')}
-        </span>
-      </button>
+      {isGuest ? (
+        <button type="button" className="btn btn--soft" onClick={onSignIn}>
+          Sign in
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="presence"
+          onClick={onOpenSettings}
+          aria-label="Your account and settings"
+          title={`${identity.name} — settings`}
+        >
+          <span className="avatar" style={{ background: identity.color }}>
+            {initialsFor(identity.name || '?')}
+          </span>
+        </button>
+      )}
     </header>
   )
 }

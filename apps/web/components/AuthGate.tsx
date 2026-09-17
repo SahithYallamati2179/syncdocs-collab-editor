@@ -81,8 +81,26 @@ export function SignInScreen({ returnTo }: { returnTo?: string }) {
   )
 }
 
-/** Blocks children until a session exists, when auth is enabled. */
-export function AuthGate({ children }: { children: React.ReactNode }) {
+/**
+ * Blocks children until a session exists, when auth is enabled.
+ *
+ * `allowGuest` is set on the document route, because a document whose link
+ * level is view or edit is meant to open without an account -- putting a
+ * sign-in wall in front of it would defeat the entire point of sharing the
+ * link. The route is not left unguarded: the server still decides, and a
+ * signed-out visitor to a restricted document gets the access-denied screen
+ * with a sign-in button on it.
+ *
+ * Every other route still requires a session. A guest has no workspace to
+ * list and cannot claim a new document, so there is nothing for them there.
+ */
+export function AuthGate({
+  children,
+  allowGuest = false,
+}: {
+  children: React.ReactNode
+  allowGuest?: boolean
+}) {
   const auth = useAuth()
 
   if (auth.status === 'disabled') return <>{children}</>
@@ -95,7 +113,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (auth.status === 'signed-out') return <SignInScreen />
+  if (auth.status === 'signed-out' && !allowGuest) return <SignInScreen />
 
   return <>{children}</>
 }

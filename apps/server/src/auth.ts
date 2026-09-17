@@ -6,6 +6,46 @@ export interface AuthedUser {
   name: string
   email: string
   picture: string
+  /**
+   * True when nobody signed in. A guest has no identity to check against an
+   * ACL, so what they may do depends entirely on the document's link level.
+   *
+   * The id is deliberately left empty for a guest. Ownership is an `ownerId`
+   * comparison, and an empty id that can never match a stored one makes
+   * "a guest accidentally owns something" impossible by construction rather
+   * than by remembering to check.
+   */
+  isGuest: boolean
+}
+
+/**
+ * What a signed-out browser presents instead of an access token.
+ *
+ * Hocuspocus will not open a connection at all when an onAuthenticate hook is
+ * configured and no token arrives, so a guest cannot simply send nothing. The
+ * sentinel carries a display name so an anonymous visitor still gets a cursor
+ * label; that name is decoration and is never treated as an identity.
+ */
+export const GUEST_TOKEN = 'guest'
+const GUEST_PREFIX = 'guest:'
+
+function guestUser(token: string): AuthedUser {
+  let name = 'Guest'
+  if (token.startsWith(GUEST_PREFIX)) {
+    try {
+      const parsed = JSON.parse(token.slice(GUEST_PREFIX.length)) as { name?: unknown }
+      if (typeof parsed.name === 'string' && parsed.name.trim()) {
+        name = parsed.name.trim().slice(0, 64)
+      }
+    } catch {
+      /* the label is optional; a malformed one is not worth refusing over */
+    }
+  }
+  return { id: '', name, email: '', picture: '', isGuest: true }
+}
+
+function isGuestToken(token: string | undefined): boolean {
+  return !token || token === GUEST_TOKEN || token.startsWith(GUEST_PREFIX)
 }
 
 /**
@@ -20,6 +60,12 @@ export interface AuthedUser {
  */
 export async function authenticate(token: string | undefined): Promise<AuthedUser> {
   if (config.authMode === 'supabase') {
+    // Absent or sentinel means "signed out", which is a legitimate state now
+    // that a link can be opened without an account. A token that is *present
+    // but invalid* still throws: silently downgrading a bad token to a guest
+    // would turn every expired session into a confusing loss of access rather
+    // than an auth error.
+    if (isGuestToken(token)) return guestUser(token ?? '')
     return verifySupabaseJwt(token)
   }
   return acceptDevIdentity(token)
@@ -35,6 +81,7 @@ function acceptDevIdentity(token: string | undefined): AuthedUser {
       name: String(parsed.name ?? 'Anonymous').slice(0, 64),
       email: '',
       picture: '',
+      isGuest: false,
     }
   } catch {
     throw new Error('Malformed identity token.')
@@ -96,6 +143,7 @@ async function verifySupabaseJwt(token: string | undefined): Promise<AuthedUser>
     name: name.slice(0, 64),
     email: email.toLowerCase(),
     picture: text(metadata.avatar_url) || text(metadata.picture),
+    isGuest: false,
   }
 }
 

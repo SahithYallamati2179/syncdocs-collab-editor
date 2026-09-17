@@ -48,24 +48,28 @@ export const LINK_ACCESS_OPTIONS: {
   id: LinkAccess
   label: string
   detail: string
+  /** Emphasised under the detail line, the way the reference design does it. */
+  note?: string
   icon: 'lock' | 'globe'
 }[] = [
   {
     id: 'restricted',
     label: 'Only invited people',
-    detail: 'The link on its own opens nothing. You choose who gets in.',
+    detail: 'Only you and the people you invite can open this. The link on its own does nothing.',
     icon: 'lock',
   },
   {
     id: 'view',
     label: 'Anyone with the link can view',
-    detail: 'Read-only. Viewers cannot type, and the server rejects it if they try.',
+    detail: 'Anyone can read the document using this link.',
+    note: 'No sign in required.',
     icon: 'globe',
   },
   {
     id: 'edit',
     label: 'Anyone with the link can edit',
-    detail: 'Full editing for anyone holding the link. Sign-in is still required.',
+    detail: 'Anyone can read and edit the document using this link.',
+    note: 'No sign in required.',
     icon: 'globe',
   },
 ]
@@ -77,6 +81,8 @@ export interface DocumentAccess {
   acl: DocumentAcl | null
   role: Role
   isOwner: boolean
+  /** True when the server resolved this caller without a signed-in account. */
+  isGuest: boolean
   linkAccess: LinkAccess
   authRequired: boolean
 }

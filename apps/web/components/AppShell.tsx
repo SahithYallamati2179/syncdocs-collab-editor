@@ -17,6 +17,7 @@ import {
 import { useCollabSession, useIdentity, useMetrics, usePresence } from '@/lib/hooks'
 import type { Identity } from '@/lib/identity'
 import { authEnabled } from '@/lib/supabase'
+import { signInWithGoogle, useAuth } from '@/lib/auth'
 import { AuthGate } from './AuthGate'
 import { Icon } from '@/lib/icons'
 import { CommandPalette, type Command } from './CommandPalette'
@@ -51,6 +52,8 @@ interface AppShellProps {
   documentId: string
   /** Extra commands contributed by the current view. */
   extraCommands?: Command[]
+  /** Set on the document route so a shared link opens without an account. */
+  allowGuest?: boolean
   children: (args: ShellRenderArgs) => React.ReactNode
 }
 
@@ -61,7 +64,7 @@ interface AppShellProps {
  */
 export function AppShell(props: AppShellProps) {
   return (
-    <AuthGate>
+    <AuthGate allowGuest={props.allowGuest}>
       <Workspace {...props} />
     </AuthGate>
   )
@@ -73,6 +76,19 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   const identityFromStore = useIdentity()
   const [identity, setIdentity] = useState<Identity | null>(null)
   const active = identity ?? identityFromStore
+
+  /**
+   * Whether this browser has a session, taken from the client's own auth state
+   * rather than from the server's reply.
+   *
+   * The distinction matters precisely when it is needed most: a signed-out
+   * visitor to a *restricted* document gets a 401, so there is no reply to read
+   * `isGuest` out of, and keying the UI off the response would offer them
+   * "start your own document" -- which a guest cannot do -- instead of the
+   * sign-in button that would actually get them in.
+   */
+  const auth = useAuth()
+  const isGuest = authEnabled && auth.status === 'signed-out'
 
   const session = useCollabSession(documentId)
   const peers = usePresence(session)
@@ -89,6 +105,7 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   const [recents, setRecents] = useState<string[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
   const [access, setAccess] = useState<DocumentAccess | null>(null)
+  const [accessMessage, setAccessMessage] = useState<string | null>(null)
 
   const { documents, error } = useServerDocuments(refreshToken)
   const stats = useServerStats()
@@ -109,21 +126,24 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
    * first keystroke, and a viewer who can type for two seconds and then watch
    * their words vanish is worse than one who never could.
    *
-   * A failure here is deliberately not surfaced: the WebSocket handshake
-   * reports access problems with a better message, and this call losing a race
-   * with a cold-starting server should not paint an error over a document that
-   * is about to open perfectly well.
+   * The failure is kept rather than swallowed, because this is the only place
+   * the *reason* survives. Hocuspocus does not forward what onAuthenticate
+   * threw -- the socket reports a bare `permission-denied` -- whereas this
+   * endpoint answers with the sentence the server actually wrote. It is only
+   * ever shown alongside a refusal from the socket, so a transient failure
+   * against a cold-starting server stays invisible.
    */
   useEffect(() => {
     if (!authEnabled) return
     let cancelled = false
     setAccess(null)
+    setAccessMessage(null)
     fetchDocumentAccess(documentId)
       .then((value) => {
         if (!cancelled) setAccess(value)
       })
-      .catch(() => {
-        /* the socket reports this better */
+      .catch((cause: Error) => {
+        if (!cancelled) setAccessMessage(cause.message)
       })
     return () => {
       cancelled = true
@@ -137,8 +157,15 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
   }, [stats])
 
   const createDocument = useCallback(() => {
+    // A guest cannot claim a document, so sending them to a fresh id would
+    // only land them on the access-denied screen. Sign-in is the actual first
+    // step, and the redirect brings them back.
+    if (isGuest) {
+      void signInWithGoogle(window.location.pathname)
+      return
+    }
     router.push(`/doc/${newDocumentId()}`)
-  }, [router])
+  }, [isGuest, router])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -307,6 +334,8 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
         onOpenSettings={() => setDialog('settings')}
         onOpenExport={() => setDialog('export')}
         readOnly={readOnly}
+        isGuest={isGuest}
+        onSignIn={() => void signInWithGoogle(window.location.pathname)}
       />
 
       <div
@@ -333,18 +362,28 @@ function Workspace({ documentId, extraCommands = [], children }: AppShellProps) 
                 <Icon name="offline" size={18} />
               </span>
               <h2 className="denied__title">You do not have access to this document</h2>
-              <p className="denied__body">{snapshot.accessError}</p>
+              <p className="denied__body">{accessMessage ?? snapshot.accessError}</p>
               <div className="row" style={{ justifyContent: 'center' }}>
-                <button type="button" className="btn btn--primary" onClick={createDocument}>
-                  <Icon name="plus" size={14} />
-                  Start your own document
-                </button>
+                {isGuest ? (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => void signInWithGoogle(window.location.pathname)}
+                  >
+                    Sign in with Google
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn--primary" onClick={createDocument}>
+                    <Icon name="plus" size={14} />
+                    Start your own document
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn"
                   onClick={() => setDialog('settings')}
                 >
-                  Switch account
+                  {isGuest ? 'Settings' : 'Switch account'}
                 </button>
               </div>
             </div>

@@ -5,9 +5,9 @@ simultaneous editing with live cursors, threaded comments, version history, offl
 support and full recovery after a network partition.
 
 **Google sign-in is optional but built in.** Out of the box the app runs with no
-accounts at all. Configure a Supabase project and it requires a Google sign-in and
-enforces per-document access control: the creator owns a document, and only people
-they invite by email can open it.
+accounts at all. Configure a Supabase project and it enforces per-document access
+control: the creator owns a document, and only people they invite by email can open
+it — unless the owner opens the link up, in which case it works with no sign-in at all.
 
 It ships with a **telemetry view** that measures the things this kind of system is
 actually judged on: convergence time after a partition, round-trip and presence
@@ -18,8 +18,8 @@ straight into a live document, and export or print what you have as Markdown, a
 standalone HTML page, plain text, or the exact ProseMirror tree.
 
 Sharing works two ways. Invite people by Google address, or open the link itself to
-**anyone with it — view-only or editable**. View-only is enforced on the connection,
-not in the toolbar.
+**anyone with it — view-only or editable, with no sign-in required**. View-only is
+enforced on the connection, not in the toolbar.
 
 **No dead UI.** Every control in the interface is wired to real behaviour — the
 simulation chips close the actual WebSocket, version history reads real snapshots off
@@ -621,8 +621,8 @@ The Share dialog offers three, and the choice is the owner's alone:
 | Level | What the bare URL is worth |
 | --- | --- |
 | **Only invited people** (default) | Nothing. The opener must be the owner or an invited member. |
-| **Anyone with the link can view** | Read-only for any signed-in account holding the link. |
-| **Anyone with the link can edit** | Full editing for any signed-in account holding the link. |
+| **Anyone with the link can view** | Read-only, **no sign-in required**. |
+| **Anyone with the link can edit** | Full editing, **no sign-in required**. |
 
 Three things about this are deliberate:
 
@@ -640,9 +640,24 @@ link-shared document by following its link; it joins your workspace only once th
 invites you. Otherwise "shared with one colleague" silently becomes a workspace-wide
 broadcast to every account on the deployment.
 
-Note that even the open levels still require a sign-in. That is a limit, not an
-oversight: presence, cursor attribution and per-user undo all key off an identity, and
-a truly anonymous editor would have none — so every edit stays attributable.
+**A guest is genuinely anonymous.** A signed-out browser presents a guest sentinel
+instead of an access token, gets a locally generated name and colour for its cursor,
+and is treated by the server as having no identity at all. What that buys it is exactly
+the link level and nothing more:
+
+- A guest can never claim an unowned document. Claim-on-first-open is how documents come
+  into existence, so it has to be attributable — otherwise anyone could mint and own
+  documents on the deployment by guessing names.
+- A guest never sees the owner's address or the invite list. A share link shares the
+  document, not the guest list; returning the raw ACL would turn a view link into a way
+  to harvest addresses.
+- A guest gets an empty explorer, and cannot invite, revoke or change the link level.
+- A token that is *present but invalid* is still an error. Only an absent token becomes a
+  guest, so an expired session surfaces as "sign in again" rather than a silent,
+  baffling loss of access.
+
+A refusal aimed at a guest is `401`, not `403`: signing in genuinely might change the
+answer, and `403` would tell the browser to stop asking.
 
 ### Export
 

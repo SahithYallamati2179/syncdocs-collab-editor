@@ -8,6 +8,7 @@ import {
   removeMember,
   type Role,
   setLinkAccess,
+  visibleAcl,
 } from './access.js'
 import { authenticate, authRequired, type AuthedUser } from './auth.js'
 import { config } from './config.js'
@@ -36,12 +37,27 @@ function sendAccess(
   user: AuthedUser,
 ): void {
   send(response, 200, {
-    acl,
+    // Redacted for anyone who arrived through the link: the owner's address
+    // and the collaborator list are not part of what a share link shares.
+    acl: visibleAcl(acl, user),
     role,
     isOwner: acl ? isOwner(acl, user) : role === 'owner',
+    isGuest: user.isGuest,
     linkAccess: acl?.linkAccess ?? 'edit',
     authRequired: authRequired(),
   })
+}
+
+/**
+ * Map a thrown error to a status.
+ *
+ * A refusal aimed at a guest is 401, not 403: signing in genuinely might
+ * change the answer, and 403 would tell the browser to stop trying. For a
+ * signed-in caller the same refusal is final, so it stays 403.
+ */
+function statusFor(error: unknown, user: AuthedUser | null): number {
+  if (!(error instanceof AccessDenied)) return 400
+  return user?.isGuest ? 401 : 403
 }
 
 /**
@@ -54,12 +70,20 @@ function sendAccess(
 async function identify(request: IncomingMessage): Promise<AuthedUser | null> {
   const header = request.headers.authorization
   const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined
-  if (!token) return null
   try {
+    // A missing header is not an error any more: authenticate() turns it into
+    // a guest, and whether a guest may proceed is a per-document question that
+    // only the link level can answer. A header that is present but invalid
+    // still fails, and still yields null.
     return await authenticate(token)
   } catch {
     return null
   }
+}
+
+/** A signed-in caller, or null for a guest or a bad token. */
+function signedIn(user: AuthedUser | null): AuthedUser | null {
+  return user && !user.isGuest ? user : null
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -116,9 +140,13 @@ export async function handleHttpRequest(
   }
 
   if (route === '/api/documents') {
-    const user = await identify(request)
+    const user = signedIn(await identify(request))
     if (authRequired() && !user) {
-      send(response, 401, { error: 'Sign in to list documents.' })
+      // Deliberately an empty list rather than a 401. A guest following a
+      // share link has no workspace to show, and painting an auth error across
+      // the explorer of someone who is legitimately reading one document is
+      // noise, not information.
+      send(response, 200, { documents: [] })
       return true
     }
     try {
@@ -140,7 +168,7 @@ export async function handleHttpRequest(
     try {
       if (authRequired()) {
         if (!user) {
-          send(response, 401, { error: 'Sign in to read version history.' })
+          send(response, 401, { error: 'Your session has expired. Sign in again.' })
           return true
         }
         // authorize(), not a raw read: opening Version History is a perfectly
@@ -164,8 +192,7 @@ export async function handleHttpRequest(
       // throwaway Y.Doc to read the historical content.
       send(response, 200, { id, state: Buffer.from(state).toString('base64') })
     } catch (error) {
-      const status = error instanceof AccessDenied ? 403 : 400
-      send(response, status, { error: (error as Error).message })
+      send(response, statusFor(error, user), { error: (error as Error).message })
     }
     return true
   }
@@ -181,7 +208,7 @@ export async function handleHttpRequest(
       return true
     }
     if (!user) {
-      send(response, 401, { error: 'Sign in to manage access.' })
+      send(response, 401, { error: 'Your session has expired. Sign in again.' })
       return true
     }
 
@@ -209,8 +236,7 @@ export async function handleHttpRequest(
 
       send(response, 405, { error: 'Method not allowed.' })
     } catch (error) {
-      const status = error instanceof AccessDenied ? 403 : 400
-      send(response, status, { error: (error as Error).message })
+      send(response, statusFor(error, user), { error: (error as Error).message })
     }
     return true
   }
@@ -231,7 +257,7 @@ export async function handleHttpRequest(
       return true
     }
     if (!user) {
-      send(response, 401, { error: 'Sign in to change link sharing.' })
+      send(response, 401, { error: 'Your session has expired. Sign in again.' })
       return true
     }
     if (method !== 'POST') {
@@ -244,8 +270,7 @@ export async function handleHttpRequest(
       const acl = await setLinkAccess(store, name, user, body.linkAccess)
       sendAccess(response, acl, 'owner', user)
     } catch (error) {
-      const status = error instanceof AccessDenied ? 403 : 400
-      send(response, status, { error: (error as Error).message })
+      send(response, statusFor(error, user), { error: (error as Error).message })
     }
     return true
   }

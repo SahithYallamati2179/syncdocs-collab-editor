@@ -70,6 +70,23 @@ function countItems(doc: Y.Doc): number {
   }
 }
 
+
+/**
+ * Turn the WebSocket close reason into something worth reading.
+ *
+ * Hocuspocus does not forward the message thrown by onAuthenticate; a refusal
+ * arrives as the bare code `permission-denied`, which is accurate and tells
+ * the person nothing about what to do next. The REST /access call returns the
+ * server's real sentence, and the shell prefers that when it has it -- this is
+ * the fallback for when the socket is the only thing that answered.
+ */
+function humaniseAuthFailure(reason: string): string {
+  if (!reason || reason === 'permission-denied') {
+    return 'This document is private. Sign in if you were invited, or ask the owner for a shareable link.'
+  }
+  return reason
+}
+
 function createSession(documentId: string, identity: Identity): CacheEntry {
   // gc: true lets Yjs collapse tombstones left behind by deleted content once
   // nothing references them. Without it a long-lived document grows forever.
@@ -92,7 +109,14 @@ function createSession(documentId: string, identity: Identity): CacheEntry {
     // refreshed rather than replayed stale.
     token: async () => {
       if (!authEnabled) return identityToken(identity)
-      return (await getAccessToken()) ?? ''
+      // Signed out is a legitimate state: a document whose link level is view
+      // or edit opens without an account. Hocuspocus will not connect at all
+      // when no token arrives, so the guest sentinel has to be a real string;
+      // it carries a display name purely so the visitor gets a cursor label.
+      return (
+        (await getAccessToken()) ??
+        `guest:${JSON.stringify({ name: identity.name })}`
+      )
     },
   })
 
@@ -176,7 +200,7 @@ function createSession(documentId: string, identity: Identity): CacheEntry {
 
   provider.on('authenticationFailed', (event: { reason: string }) => {
     metrics.recordEvent('error', `Access denied: ${event.reason}`)
-    metrics.setAccessError(event.reason || 'You do not have access to this document.')
+    metrics.setAccessError(humaniseAuthFailure(event.reason))
     // Without this the provider retries forever against a server that has
     // already said no, which looks like a flapping connection rather than a
     // permissions problem.

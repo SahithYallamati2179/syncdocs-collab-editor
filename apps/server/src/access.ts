@@ -30,7 +30,19 @@ function normaliseEmail(email: string): string {
 }
 
 export function isOwner(acl: DocumentAcl, user: AuthedUser): boolean {
-  return acl.ownerId === user.id
+  // Both guards matter. A guest carries an empty id, so without the first
+  // check any ACL that somehow stored an empty ownerId would hand ownership to
+  // every anonymous visitor at once; the second refuses that record outright.
+  if (user.isGuest) return false
+  return Boolean(acl.ownerId) && acl.ownerId === user.id
+}
+
+/** True when this caller reached the document through the link alone. */
+export function isLinkVisitor(acl: DocumentAcl, user: AuthedUser): boolean {
+  if (isOwner(acl, user)) return false
+  if (user.isGuest) return true
+  const email = normaliseEmail(user.email)
+  return !email || !acl.members.some((member) => normaliseEmail(member.email) === email)
 }
 
 /**
@@ -43,11 +55,17 @@ export function isOwner(acl: DocumentAcl, user: AuthedUser): boolean {
 export function roleFor(acl: DocumentAcl, user: AuthedUser): Role | null {
   if (isOwner(acl, user)) return 'owner'
 
-  const email = normaliseEmail(user.email)
-  if (email && acl.members.some((member) => normaliseEmail(member.email) === email)) {
-    return 'editor'
+  if (!user.isGuest) {
+    const email = normaliseEmail(user.email)
+    if (email && acl.members.some((member) => normaliseEmail(member.email) === email)) {
+      return 'editor'
+    }
   }
 
+  // Reached only by someone with no standing of their own, which is exactly
+  // what the link level is for. A guest and a signed-in stranger are treated
+  // identically here: the link is the credential, so requiring an account on
+  // top of it would gate on something that grants nothing.
   if (acl.linkAccess === 'edit') return 'editor'
   if (acl.linkAccess === 'view') return 'viewer'
   return null
@@ -81,6 +99,14 @@ export async function authorize(
   const existing = await store.getAcl(documentName)
 
   if (!existing) {
+    // Claim-on-first-open is how a document comes into being, so it has to be
+    // attributable. A guest gets no document of their own out of visiting a
+    // URL nobody has taken yet -- otherwise anyone could mint documents on a
+    // deployment by guessing names, and own them.
+    if (user.isGuest) {
+      throw new AccessDenied('Sign in to start a document. This link does not open anything yet.')
+    }
+
     const acl: DocumentAcl = {
       ownerId: user.id,
       ownerEmail: normaliseEmail(user.email),
@@ -97,7 +123,9 @@ export async function authorize(
   const role = roleFor(existing, user)
   if (!role) {
     throw new AccessDenied(
-      'You do not have access to this document. Ask the owner to invite your Google account, or to turn on link sharing.',
+      user.isGuest
+        ? 'This document is private. Sign in if you were invited, or ask the owner for a shareable link.'
+        : 'You do not have access to this document. Ask the owner to invite your Google account, or to turn on link sharing.',
     )
   }
 
@@ -118,6 +146,9 @@ async function requireOwner(
   user: AuthedUser,
   action: string,
 ): Promise<DocumentAcl> {
+  if (user.isGuest) {
+    throw new AccessDenied(`Sign in to ${action}. Only the document's owner can.`)
+  }
   const { acl } = await authorize(store, documentName, user)
   if (!acl) throw new Error('Access control is not enabled for this deployment.')
   if (!isOwner(acl, user)) throw new AccessDenied(`Only the owner can ${action}.`)
@@ -210,7 +241,9 @@ export async function filterAccessible<T extends { name: string }>(
   user: AuthedUser | null,
 ): Promise<T[]> {
   if (!authRequired()) return documents
-  if (!user) return []
+  // No identity means nothing to list against. A guest is here for one shared
+  // link, not for a workspace.
+  if (!user || user.isGuest) return []
 
   const visible: T[] = []
   for (const document of documents) {
@@ -218,15 +251,22 @@ export async function filterAccessible<T extends { name: string }>(
     // A document with no access record has never been opened by an
     // authenticated user, so nobody owns it yet and nobody should see it listed.
     if (!acl) continue
-    const role = roleFor(acl, user)
-    if (role === 'owner' || (role === 'editor' && !isLinkOnly(acl, user))) visible.push(document)
+    if (isLinkVisitor(acl, user)) continue
+    if (roleFor(acl, user)) visible.push(document)
   }
   return visible
 }
 
-/** True when this user's only claim on the document is the link itself. */
-function isLinkOnly(acl: DocumentAcl, user: AuthedUser): boolean {
-  if (isOwner(acl, user)) return false
-  const email = normaliseEmail(user.email)
-  return !email || !acl.members.some((member) => normaliseEmail(member.email) === email)
+/**
+ * The version of an ACL a given caller is allowed to see.
+ *
+ * Someone who arrived through a link has no standing to learn who else the
+ * document was shared with. Returning the raw record would turn a view link
+ * into a way to harvest the owner's address and every collaborator's, which is
+ * a worse leak than the content the link was meant to share.
+ */
+export function visibleAcl(acl: DocumentAcl | null, user: AuthedUser): DocumentAcl | null {
+  if (!acl) return null
+  if (!isLinkVisitor(acl, user)) return acl
+  return { ...acl, ownerEmail: '', members: [] }
 }

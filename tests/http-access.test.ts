@@ -101,9 +101,9 @@ afterAll(async () => {
 })
 
 describe('access endpoints over HTTP', () => {
-  it('refuses an unauthenticated caller with 401, not 403', async () => {
-    // 403 would imply the document exists and this caller was judged; 401 is
-    // the truthful "you have not said who you are".
+  it('refuses a signed-out caller on an unclaimed document with 401, not 403', async () => {
+    // 401 rather than 403 because signing in genuinely might change the
+    // answer. 403 would tell the browser to stop trying.
     const result = await call('GET', '/api/documents/doc-http/access')
     expect(result.status).toBe(401)
     expect(result.headers.get('access-control-allow-origin')).toBeTruthy()
@@ -222,10 +222,114 @@ describe('access endpoints over HTTP', () => {
     expect(result.headers.get('access-control-allow-headers')).toContain('authorization')
   })
 
+  it('returns an empty document list to a guest rather than an auth error', async () => {
+    // A guest following a share link has no workspace to show. Painting an
+    // auth error across the explorer of someone legitimately reading one
+    // document is noise, not information.
+    const result = await call('GET', '/api/documents')
+    expect(result.status).toBe(200)
+    expect(result.body.documents).toEqual([])
+  })
+
   it('reports health without requiring a token', async () => {
     const result = await call('GET', '/health')
     expect(result.status).toBe(200)
     expect(result.body.authRequired).toBe(true)
     expect(result.body.driver).toBe('file')
+  })
+})
+
+/**
+ * The anonymous path, end to end over HTTP. This is what "Anyone with the
+ * link — no sign in required" means in practice: no Authorization header at
+ * all, and the document still opens.
+ */
+describe('guest access over HTTP', () => {
+  beforeAll(async () => {
+    await call('GET', '/api/documents/doc-open/access', ownerToken)
+  })
+
+  it('keeps a guest out of a restricted document', async () => {
+    const result = await call('GET', '/api/documents/doc-open/access')
+    expect(result.status).toBe(401)
+    expect(String(result.body.error)).toMatch(/private/i)
+  })
+
+  it('lets a guest in once the owner opens the link, with no token at all', async () => {
+    await call('POST', '/api/documents/doc-open/access/link', ownerToken, {
+      linkAccess: 'view',
+    })
+
+    const viewer = await call('GET', '/api/documents/doc-open/access')
+    expect(viewer.status).toBe(200)
+    expect(viewer.body.role).toBe('viewer')
+    expect(viewer.body.isGuest).toBe(true)
+    expect(viewer.body.isOwner).toBe(false)
+
+    await call('POST', '/api/documents/doc-open/access/link', ownerToken, {
+      linkAccess: 'edit',
+    })
+    expect((await call('GET', '/api/documents/doc-open/access')).body.role).toBe('editor')
+  })
+
+  it('does not leak the owner address or the invite list to a guest', async () => {
+    await call('POST', '/api/documents/doc-open/access', ownerToken, {
+      email: 'invitee@example.com',
+    })
+
+    const asGuest = await call('GET', '/api/documents/doc-open/access')
+    const acl = asGuest.body.acl as { ownerEmail: string; members: unknown[] }
+    expect(acl.ownerEmail).toBe('')
+    expect(acl.members).toEqual([])
+
+    // The owner still sees the real record.
+    const asOwner = await call('GET', '/api/documents/doc-open/access', ownerToken)
+    const full = asOwner.body.acl as { ownerEmail: string; members: unknown[] }
+    expect(full.ownerEmail).toBe('owner@example.com')
+    expect(full.members).toHaveLength(1)
+  })
+
+  it('refuses every mutation from a guest even on an editable link', async () => {
+    expect(
+      (await call('POST', '/api/documents/doc-open/access', undefined, { email: 'x@y.com' }))
+        .status,
+    ).toBe(401)
+    expect(
+      (await call('DELETE', '/api/documents/doc-open/access', undefined, { email: 'x@y.com' }))
+        .status,
+    ).toBe(401)
+    expect(
+      (
+        await call('POST', '/api/documents/doc-open/access/link', undefined, {
+          linkAccess: 'restricted',
+        })
+      ).status,
+    ).toBe(401)
+
+    // Still exactly as the owner left it.
+    const acl = await call('GET', '/api/documents/doc-open/access', ownerToken)
+    expect(acl.body.linkAccess).toBe('edit')
+  })
+
+  /**
+   * A token that is present but invalid must not quietly become a guest --
+   * that would turn every expired session into a silent, confusing loss of
+   * access rather than an auth error the client can act on.
+   */
+  it('rejects a malformed token instead of downgrading it to a guest', async () => {
+    const result = await call('GET', '/api/documents/doc-open/access', 'not.a.jwt')
+    expect(result.status).toBe(401)
+    expect(String(result.body.error)).toMatch(/session/i)
+  })
+
+  it('never lets a guest claim a document nobody has opened', async () => {
+    const result = await call('GET', '/api/documents/doc-nobody/access')
+    expect(result.status).toBe(401)
+    expect(String(result.body.error)).toMatch(/sign in/i)
+
+    // And the real owner can still take it afterwards.
+    const claimed = await call('GET', '/api/documents/doc-nobody/access', ownerToken)
+    expect(claimed.status).toBe(200)
+    expect(claimed.body.isOwner).toBe(true)
   })
 })

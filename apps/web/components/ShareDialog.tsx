@@ -120,7 +120,15 @@ export function ShareDialog({
     <Modal title="Share this document" onClose={onClose} width={560}>
       {authEnabled && loading && <div className="empty">Loading access…</div>}
 
-      {authEnabled && !loading && access && (
+      {authEnabled && !loading && access?.isGuest && (
+        <div className="notice">
+          <strong>You are viewing this as a guest.</strong> The owner opened this document to
+          anyone with the link, so no account was needed. Sign in if you want documents of your
+          own — the people and access settings belong to the owner.
+        </div>
+      )}
+
+      {authEnabled && !loading && access && !access.isGuest && (
         <>
           <div className="field">
             <span className="field__label">People with access</span>
@@ -235,7 +243,15 @@ export function ShareDialog({
                       </span>
                       <span className="access-menu__text">
                         <strong>{option.label}</strong>
-                        <span>{option.detail}</span>
+                        <span>
+                          {option.detail}
+                          {option.note && (
+                            <>
+                              {' '}
+                              <strong className="access-menu__note">{option.note}</strong>
+                            </>
+                          )}
+                        </span>
                       </span>
                       {option.id === current.id && <Icon name="check" size={15} />}
                     </button>
@@ -274,7 +290,9 @@ export function ShareDialog({
             ? 'Anyone who opens this link joins the same document and can edit it.'
             : access?.linkAccess === 'restricted'
               ? 'The link alone is not enough — the person also has to be invited above, or you can open the link up.'
-              : 'Anyone signed in who holds this link gets in. Only people you invite see it listed in their explorer.'}
+              : access?.linkAccess === 'view'
+                ? 'Anyone who opens this link can read the document, with no sign-in. Only people you invite see it listed in their explorer.'
+                : 'Anyone who opens this link can edit the document, with no sign-in. Only people you invite see it listed in their explorer.'}
         </span>
       </div>
 

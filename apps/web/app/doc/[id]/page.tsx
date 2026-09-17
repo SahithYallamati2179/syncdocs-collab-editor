@@ -36,7 +36,7 @@ export default function DocumentPage() {
   }
 
   return (
-    <AppShell documentId={documentId}>
+    <AppShell documentId={documentId} allowGuest>
       {({ session, identity, peers, snapshot, setEditor, editor, toast, readOnly }) => (
         <DocumentView
           documentId={documentId}

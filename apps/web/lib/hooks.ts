@@ -29,11 +29,23 @@ export function useIdentity(): Identity {
   const [local, setLocal] = useState<Identity | null>(null)
 
   useEffect(() => {
-    if (!authEnabled) setLocal(getIdentity())
-  }, [])
+    // Two cases need the local identity now. Auth switched off entirely, and
+    // auth on but signed out -- a guest following a share link still has to
+    // have a name and a colour, or their cursor is unlabelled and, worse,
+    // useCollabSession refuses to open a session for an identity with no id
+    // and the document never loads at all.
+    //
+    // This is a display identity, not a claim. The server treats a guest as
+    // anonymous whatever name the client sends.
+    if (!authEnabled || auth.status === 'signed-out') setLocal(getIdentity())
+  }, [auth.status])
 
   return useMemo(() => {
-    if (authEnabled) return auth.identity ?? EMPTY_IDENTITY
+    // While the session is still being restored, `local` is null and this
+    // stays empty on purpose: opening a socket under a guest identity and
+    // then swapping it for the real one a moment later would reconnect every
+    // signed-in user once per page load.
+    if (authEnabled) return auth.identity ?? local ?? EMPTY_IDENTITY
     return local ?? EMPTY_IDENTITY
   }, [auth.identity, local])
 }
