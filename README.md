@@ -792,6 +792,28 @@ Optional locally, **required for any real deployment** — see the free-tier not
    database created before link sharing upgrades in place.
 3. Set `STORAGE_DRIVER=postgres` and `DATABASE_URL=...` in `apps/server/.env`.
 
+### What the server checks at startup
+
+`STORAGE_DRIVER=postgres` is validated before the connection pool is built, and
+the database is probed once the server is listening. Each check exists because
+the corresponding mistake otherwise surfaces late and blames the wrong thing:
+
+| Problem | What you would have seen instead |
+| --- | --- |
+| `DATABASE_URL` empty or malformed | A driver error with no mention of the variable |
+| The `[YOUR-PASSWORD]` placeholder left in | `password authentication failed`, with no hint that the password is literally the placeholder |
+| The direct `db.<ref>.supabase.co` host | A **hang**, then a timeout — reading as a slow database rather than an unreachable one |
+| Schema never run | `relation "documents" does not exist`, on someone's first edit rather than at boot |
+| Host unreachable | Nothing at all until the first persist, minutes later |
+
+The malformed cases refuse to start, because there is nothing sensible to do
+with them. An unreachable host or a missing schema is logged loudly and marks
+`/health` as `degraded` but does **not** kill the process: live collaboration is
+a pure relay and keeps working without storage, so exiting would turn a
+durability problem into an outage.
+
+The connection string is redacted before it reaches a log.
+
 ### A note on Supabase and RLS
 
 Supabase publishes every table in the `public` schema through PostgREST, and the

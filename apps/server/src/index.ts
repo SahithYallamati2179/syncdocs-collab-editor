@@ -186,6 +186,28 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGINT', () => void shutdown('SIGINT'))
 process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
+/**
+ * Report the state of the database before anyone tries to use it. Only the
+ * Postgres driver has anything to check; the file driver's failure mode is
+ * already covered by the storage-failure counter on /health.
+ */
+async function checkStorage(): Promise<void> {
+  const candidate = store as { preflight?: (ms?: number) => Promise<{ ok: boolean; detail: string }> }
+  if (typeof candidate.preflight !== 'function') return
+
+  const { ok, detail } = await candidate.preflight()
+  if (ok) {
+    console.log(`[storage] postgres ${detail}`)
+  } else {
+    // Not fatal. Live collaboration is a pure relay and keeps working without
+    // storage; killing the process would turn a durability problem into an
+    // outage. The failure is recorded so /health stops claiming everything is
+    // fine, which is the same treatment a failed write gets.
+    metrics.storageFailed(`preflight: ${detail}`)
+    console.error(`[storage] postgres NOT USABLE: ${detail}`)
+  }
+}
+
 server.listen().then(() => {
   console.log('----------------------------------------------------------')
   console.log(` collab-editor sync server`)
@@ -194,4 +216,5 @@ server.listen().then(() => {
   console.log(` auth    : ${config.authMode}${config.authMode === 'supabase' ? ' (Google sign-in required)' : ' (no sign-in)'}`)
   console.log(` debounce: ${config.persistDebounceMs}ms (max ${config.persistMaxDebounceMs}ms)`)
   console.log('----------------------------------------------------------')
+  void checkStorage()
 })

@@ -146,6 +146,55 @@ export class PostgresStore implements DocStore {
     )
   }
 
+  /**
+   * Prove the database is reachable and has the schema, at startup.
+   *
+   * Without this the first sign of trouble is a failed persist minutes later,
+   * logged against a document name, long after the deploy that caused it. The
+   * timeout matters as much as the query: an unreachable host does not refuse
+   * the connection, it hangs, so waiting indefinitely here would replace a
+   * clear failure with a silent one.
+   */
+  async preflight(timeoutMs = 10_000): Promise<{ ok: boolean; detail: string }> {
+    const timeout = new Promise<never>((_resolve, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `no response within ${timeoutMs}ms — the host is probably unreachable from here ` +
+                '(a wrong host hangs rather than refusing)',
+            ),
+          ),
+        timeoutMs,
+      )
+    })
+
+    try {
+      const check = this.pool.query<{ present: string }>(
+        "select string_agg(table_name, ',' order by table_name) as present " +
+          'from information_schema.tables ' +
+          "where table_schema = 'public' " +
+          "and table_name in ('documents','document_snapshots','document_access')",
+      )
+
+      const result = await Promise.race([check, timeout])
+      const present = (result.rows[0]?.present ?? '').split(',').filter(Boolean)
+      const missing = ['document_access', 'document_snapshots', 'documents'].filter(
+        (table) => !present.includes(table),
+      )
+
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          detail: `connected, but these tables are missing: ${missing.join(', ')}. Run apps/server/sql/schema.sql once.`,
+        }
+      }
+      return { ok: true, detail: `connected, all ${present.length} tables present` }
+    } catch (error) {
+      return { ok: false, detail: (error as Error).message }
+    }
+  }
+
   async remove(name: string): Promise<void> {
     assertSafeDocumentName(name)
     const client = await this.pool.connect()
