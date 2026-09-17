@@ -71,8 +71,14 @@ export async function addMember(
   user: AuthedUser,
   email: string,
 ): Promise<DocumentAcl> {
-  const acl = await store.getAcl(documentName)
-  if (!acl) throw new AccessDenied('This document has no owner yet.')
+  // Goes through authorize(), not a raw read, so the very first person to open
+  // the Share dialog on a brand-new document claims ownership here rather than
+  // seeing "no owner yet" -- the same claim-on-first-open behaviour the
+  // WebSocket already gets. Without this there is a race: whichever of the WS
+  // handshake or this HTTP call happens to run first decides whether the
+  // document already has an owner.
+  const acl = await authorize(store, documentName, user)
+  if (!acl) throw new Error('Access control is not enabled for this deployment.')
   if (!isOwner(acl, user)) throw new AccessDenied('Only the owner can invite people.')
 
   const target = normaliseEmail(email)
@@ -100,8 +106,8 @@ export async function removeMember(
   user: AuthedUser,
   email: string,
 ): Promise<DocumentAcl> {
-  const acl = await store.getAcl(documentName)
-  if (!acl) throw new AccessDenied('This document has no owner yet.')
+  const acl = await authorize(store, documentName, user)
+  if (!acl) throw new Error('Access control is not enabled for this deployment.')
   if (!isOwner(acl, user)) throw new AccessDenied('Only the owner can remove people.')
 
   const target = normaliseEmail(email)

@@ -138,4 +138,51 @@ describe('document access control', () => {
       /do not have access/i,
     )
   })
+
+  /**
+   * Regression coverage for a real bug: addMember/removeMember used to read
+   * the ACL with a plain store.getAcl() instead of authorize(), so calling
+   * either of them before any WebSocket had ever connected to the document
+   * threw "This document has no owner yet." — which is exactly what the Share
+   * dialog does on a brand-new document if you open it before the editor's
+   * socket finishes its handshake. The REST path now claims ownership itself,
+   * the same way the WebSocket path always has.
+   */
+  it('lets the very first HTTP call on a brand-new document claim ownership via addMember', async () => {
+    // No authorize()/WS call has ever touched this name.
+    const acl = await access.addMember(store, 'doc-delta', owner, 'invited@example.com')
+    expect(acl.ownerId).toBe(owner.id)
+    expect(acl.members.map((member) => member.email)).toEqual(['invited@example.com'])
+  })
+
+  it('lets the very first HTTP call on a brand-new document claim ownership via removeMember', async () => {
+    const acl = await access.removeMember(store, 'doc-epsilon', owner, 'nobody@example.com')
+    expect(acl.ownerId).toBe(owner.id)
+  })
+
+  it('refuses invite/remove from an invited member who is not the owner', async () => {
+    await access.authorize(store, 'doc-zeta', owner)
+    await access.addMember(store, 'doc-zeta', owner, 'invited@example.com')
+
+    // `invited` genuinely has access to doc-zeta (they are a member), so this
+    // exercises the isOwner() check inside addMember/removeMember, not the
+    // authorize() access check above it.
+    await expect(
+      access.addMember(store, 'doc-zeta', invited, 'someone-else@example.com'),
+    ).rejects.toThrow(/only the owner/i)
+    await expect(
+      access.removeMember(store, 'doc-zeta', invited, 'owner@example.com'),
+    ).rejects.toThrow(/only the owner/i)
+  })
+
+  it('refuses invite/remove from someone with no access at all, with the generic denial', async () => {
+    await access.authorize(store, 'doc-eta', owner)
+    // `stranger` has never been invited to doc-eta, so this should fail at the
+    // authorize() check -- before ever reaching the owner-only logic -- and
+    // say "you do not have access" rather than something that confirms the
+    // document exists and has an owner.
+    await expect(
+      access.addMember(store, 'doc-eta', stranger, 'someone@example.com'),
+    ).rejects.toThrow(/do not have access/i)
+  })
 })

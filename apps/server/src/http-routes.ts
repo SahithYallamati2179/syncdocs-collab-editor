@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   AccessDenied,
   addMember,
-  canAccess,
+  authorize,
   filterAccessible,
   isOwner,
   removeMember,
@@ -122,11 +122,11 @@ export async function handleHttpRequest(
           send(response, 401, { error: 'Sign in to read version history.' })
           return true
         }
-        const acl = await store.getAcl(name)
-        if (!acl || !canAccess(acl, user)) {
-          send(response, 403, { error: 'You do not have access to this document.' })
-          return true
-        }
+        // authorize(), not a raw read: opening Version History is a perfectly
+        // normal way to be the first person to touch a document, and should
+        // claim ownership rather than 403 just because no WebSocket has
+        // connected yet.
+        await authorize(store, name, user)
       }
 
       if (!id) {
@@ -143,7 +143,8 @@ export async function handleHttpRequest(
       // throwaway Y.Doc to read the historical content.
       send(response, 200, { id, state: Buffer.from(state).toString('base64') })
     } catch (error) {
-      send(response, 400, { error: (error as Error).message })
+      const status = error instanceof AccessDenied ? 403 : 400
+      send(response, status, { error: (error as Error).message })
     }
     return true
   }
@@ -165,12 +166,12 @@ export async function handleHttpRequest(
 
     try {
       if (method === 'GET') {
-        const acl = await store.getAcl(name)
-        if (!acl || !canAccess(acl, user)) {
-          send(response, 403, { error: 'You do not have access to this document.' })
-          return true
-        }
-        send(response, 200, { acl, isOwner: isOwner(acl, user), authRequired: true })
+        // authorize(), not a raw read: opening the Share dialog is often the
+        // first thing that touches a brand-new document, and should claim
+        // ownership rather than 403 just because the editor's WebSocket
+        // hasn't connected (or finished connecting) yet.
+        const acl = await authorize(store, name, user)
+        send(response, 200, { acl, isOwner: acl ? isOwner(acl, user) : false, authRequired: true })
         return true
       }
 
