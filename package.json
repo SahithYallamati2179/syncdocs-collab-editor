@@ -1,0 +1,30 @@
+{
+  "name": "collab-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time collaborative rich-text editor built on Yjs CRDTs, with an instrumented metrics lab.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace @collab/server",
+    "dev:web": "npm run dev --workspace @collab/web",
+    "build": "npm run build --workspace @collab/server && npm run build --workspace @collab/web",
+    "start:server": "npm run start --workspace @collab/server",
+    "start:web": "npm run start --workspace @collab/web",
+    "start": "concurrently -k -n server,web -c blue,magenta \"npm:start:server\" \"npm:start:web\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "npm run typecheck --workspace @collab/server && npm run typecheck --workspace @collab/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9",
+    "yjs": "^13.6.23"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

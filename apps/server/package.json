@@ -1,0 +1,27 @@
+{
+  "name": "@collab/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hocuspocus-based Yjs sync relay with pluggable persistence.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^2.15.2",
+    "dotenv": "^16.4.7",
+    "jose": "^5.9.6",
+    "pg": "^8.13.1",
+    "yjs": "^13.6.23"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
