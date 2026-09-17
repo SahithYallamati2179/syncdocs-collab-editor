@@ -2358,3 +2358,71 @@ textarea {
   color: var(--ink-3);
   font-style: normal;
 }
+
+/* --- floating control over a text selection ----------------------------- */
+
+.selection-bubble {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  /* Sit above the selection and centre on it. */
+  transform: translate(-50%, calc(-100% - 10px));
+  animation: bubble-in 0.12s ease-out;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 4px));
+  }
+}
+
+.selection-bubble__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.selection-bubble__btn:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.selection-bubble__btn--icon {
+  padding: 6px 8px;
+}
+
+.selection-bubble__btn[data-active='true'] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.selection-bubble__sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
+@media print {
+  .selection-bubble {
+    display: none;
+  }
+}

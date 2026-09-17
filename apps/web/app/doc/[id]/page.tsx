@@ -7,6 +7,7 @@ import { AppShell } from '@/components/AppShell'
 import { Editor } from '@/components/Editor'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { PromptDialog } from '@/components/PromptDialog'
+import { SelectionBubble } from '@/components/SelectionBubble'
 import { StatusStrip } from '@/components/StatusStrip'
 import { PresenceAvatar } from '@/components/TopBar'
 import type { CollabSession } from '@/lib/collab'
@@ -193,6 +194,13 @@ function DocumentView({
           )}
         </article>
       </div>
+
+      <SelectionBubble
+        editor={editor}
+        readOnly={readOnly}
+        onAddComment={onAddComment}
+        onHighlight={() => editor?.chain().focus().toggleHighlight().run()}
+      />
 
       {dialog === 'link' && (
         <PromptDialog
