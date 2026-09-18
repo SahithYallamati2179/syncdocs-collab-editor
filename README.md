@@ -213,6 +213,7 @@ collab-editor/
 │   │   │   ├── http-routes.ts   REST endpoints on the WebSocket port
 │   │   │   └── storage/
 │   │   │       ├── types.ts     DocStore contract + name validation
+│   │   │       ├── database-url.ts    DATABASE_URL checks run at startup
 │   │   │       ├── file-store.ts      default: one .bin per document
 │   │   │       └── postgres-store.ts  opt-in: Supabase/Neon/any Postgres
 │   │   └── sql/schema.sql       run once for the Postgres driver
@@ -230,13 +231,16 @@ collab-editor/
 │       │   ├── Sidebar.tsx           document explorer
 │       │   ├── RightPanel.tsx        comments + activity
 │       │   ├── Editor.tsx            TipTap + Collaboration + cursors
+│       │   ├── SelectionBubble.tsx   floating comment/highlight control
 │       │   ├── EditorToolbar.tsx     formatting controls
 │       │   ├── StatusStrip.tsx       connection line + simulation chips
 │       │   ├── CommandPalette.tsx    ⌘K
 │       │   ├── VersionHistoryPanel.tsx  versions, inside the activity tab
 │       │   ├── ShareDialog.tsx      people, access level, copy link
 │       │   ├── ExportDialog.tsx     format picker, live preview, print
-│       │   ├── ImportDialog.tsx     drag-drop upload, append or replace
+│       │   ├── ImportDialog.tsx     drag-drop upload, then review
+│       │   ├── ImportReview.tsx     line diff, accept or reject each change
+│       │   ├── ConfirmDialog.tsx    type-to-confirm for destructive actions
 │       │   ├── SettingsDialog.tsx · PromptDialog.tsx · Modal.tsx
 │       │   └── LineChart.tsx         inline SVG chart with crosshair tooltip
 │       └── lib/
@@ -244,9 +248,12 @@ collab-editor/
 │           ├── supabase.ts      client + the authEnabled switch
 │           ├── collab.ts        session manager: Y.Doc + providers, refcounted
 │           ├── comments.ts      comment threads stored in the Y.Doc
+│           ├── comment-mark.ts  the mark anchoring a comment to text
+│           ├── diff.ts          line + word diff behind the import review
 │           ├── documents.ts     document list, title field, snapshots, access
-│           ├── export.ts       Markdown/HTML/text/JSON serialisers, print
-│           ├── import.ts       .docx/.md/.html/.txt/.json readers, sanitiser
+│           ├── export.ts        Markdown/HTML/text/JSON, images, print
+│           ├── export-docx.ts   real OOXML .docx generation
+│           ├── import.ts        .docx/.md/.html/.txt/.json readers, sanitiser
 │           ├── metrics.ts       client instrumentation store
 │           ├── identity.ts · colors.ts · theme.ts · icons.tsx · font-size.ts
 │           └── hooks.ts         React bindings
@@ -254,9 +261,11 @@ collab-editor/
 └── tests/
     ├── convergence.test.ts      hand-written partition + footprint cases
     ├── fuzz.test.ts             seeded randomised convergence property test
-    ├── access.test.ts           ownership, invites, revocation, link levels
+    ├── access.test.ts           ownership, invites, link levels, guests
     ├── http-access.test.ts      the REST surface, over real HTTP
-    └── markdown.test.ts         the hand-rolled Markdown converter
+    ├── markdown.test.ts         the hand-rolled Markdown converter
+    ├── diff.test.ts             the import review's line and word diff
+    └── database-url.test.ts     the DATABASE_URL startup checks
 ```
 
 ---
